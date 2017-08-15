@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ -z $1  ]; then
+  echo "Usage: $(basename $0) <command>"
+  exit
+fi
+
+if [ -z "$(pidof $1)" ]; then
+  (screen -S $1 $1)
+else
+	(screen -Dr $1)
+fi

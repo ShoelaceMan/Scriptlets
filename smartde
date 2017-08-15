@@ -1,0 +1,13 @@
+#! /bin/sh
+#
+# smartde.sh
+# Copyright (C) 2017 trent <trent@ip228>
+#
+# Distributed under terms of the MIT license.
+#
+
+if [ -z $(which $(cat /home/$USER/.derc)) ]; then
+  exec startfluxbox
+else
+  exec $(cat /home/$USER/.derc)
+fi

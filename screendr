@@ -1,0 +1,27 @@
+#!/bin/bash
+TMPFILE=$(mktemp)
+
+makeList()
+{
+  screen -ls | grep 'Detached' | awk '{print $1}' | awk '{printf("%5d %s\n", NR,$0)}'
+}
+
+if [ -z $(makeList) ]; then
+  echo "There are no detached screens on $(hostname)."
+  exit 1
+fi
+
+dialog --menu "Choose one:" 15 50 10 \
+    $(makeList) 2>$TMPFILE
+
+cat $TMPFILE
+RESULT=$(cat $TMPFILE)
+
+if [ -z $RESULT ]; then
+  exit 0
+else
+  RESULT=$(screen -ls | grep $(hostname) | awk '{print $1}' | awk "NR==$RESULT")
+  screen -Dr $(screen -ls | grep 'Detached' | awk '{print $1}' | awk '{printf("%5d %s\n", NR,$0)}' | grep $(cat $TMPFILE) | awk '{print $2}')
+fi
+
+rm $TMPFILE

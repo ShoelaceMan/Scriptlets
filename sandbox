@@ -1,0 +1,13 @@
+#!/bin/bash
+
+if [ ! -d /tmp/sandbox  ]; then
+  sudo su -c "mkdir /tmp/sandbox" sandbox
+fi
+
+if [ $# -ge 1 ]; then
+  sand=$@
+  echo "starting ${game}"
+  sudo su -c $sand sandbox
+else
+  sudo su sandbox
+fi

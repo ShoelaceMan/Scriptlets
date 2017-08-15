@@ -1,0 +1,7 @@
+#! /bin/bash
+
+win=$(xdotool getwindowfocus)
+x=$(($(xdotool getwindowgeometry $win | grep Geometry: | grep -o '[0-9]*' | head -n 1)/2))
+y=$(($(xdotool getwindowgeometry $win | grep Geometry: | grep -o '[0-9]*' | tail -n 1)/2))
+
+xdotool mousemove -w $(xdotool getwindowfocus) $x $y

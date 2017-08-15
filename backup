@@ -1,0 +1,32 @@
+#! /bin/bash
+
+secs=$((10 * 60))
+
+if [[ $EUID -ne 0  ]]; then
+  echo "$(basename $0) must be run as root"
+  exit 1
+fi
+
+
+echo "##############################################################"
+hostname
+date
+
+if [ -e /tmp/nobackup ]; then
+  echo "/tmp/nobackup exists, backup canceled."
+  rm -rf /tmp/nobackup
+  echo
+  exit 1
+fi
+
+xmessage -timeout $secs -nearmous -buttons "run,cancel" "Performing backup in $(($secs / 60)) minutes."
+
+if [ $? -eq 102  ]; then
+  echo "User cancelled backup"
+else
+  echo "Running backup"
+  rsync -aAXv --delete --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} / /mnt/backup/$(hostname)
+  sudo tar -pvczf /mnt/backup/tarballs/$(hostname).tar.gz -C /mnt/backup/$(hostname) .
+  echo "Backup completed at $(date)"
+fi
+echo

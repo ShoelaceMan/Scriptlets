@@ -1,0 +1,13 @@
+#!/bin/bash
+# query cpanel license verification site
+
+URL="https://verify.cpanel.net/index.cgi?ip="
+IP="$1"
+
+/usr/bin/curl "$URL"+"$IP" 2> /dev/null | grep Results 2>/dev/null 
+
+EXIT=$?
+
+if [ $EXIT = 1 ] ; then
+	/usr/bin/curl "$URL"+"$IP" 2> /dev/null | grep active | sed -e 's/<[^>]*>//g' | column -t | grep 'active  on'
+fi
