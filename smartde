@@ -6,6 +6,8 @@
 # Distributed under terms of the MIT license.
 #
 
+source ~/.envrc
+
 if [ -z $(which $(cat /home/$USER/.derc)) ]; then
   exec startfluxbox
 else
