@@ -4,29 +4,29 @@ genfile='/etc/modprobe.d/vfioselect.conf' 	# modify this to use a different conf
 
 cleanup()
 {
-	rm $tmpfile
+  rm $tmpfile
 }
 
 makelist()
 {
   touch $genfile
-	IFS=$'\n' 	# make newlines the only separator
-	for pci in $(lspci -n | awk '{print $3}')
-	do
+  IFS=$'\n' 	# make newlines the only separator
+  for pci in $(lspci -n | awk '{print $3}')
+  do
     if grep -q $pci "$genfile"; then
       menuitems+=("$pci" "$(lspci -nn | grep $pci)" "on")
     else
-		  menuitems+=("$pci" "$(lspci -nn | grep $pci)" "off")
+      menuitems+=("$pci" "$(lspci -nn | grep $pci)" "off")
     fi
-	done
+  done
 
-	dialog --keep-tite --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
+  dialog --keep-tite --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
 }
 
 
 makefile()
 {
-	echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
+  echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
 }
 
 #Check for root access
@@ -34,7 +34,7 @@ if [[ "$(whoami)" != "root" ]]; then
   echo "This program requires root access."
   exit 1
 else
-	makelist
-	makefile
-	cleanup
+  makelist
+  makefile
+  cleanup
 fi
