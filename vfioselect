@@ -21,6 +21,7 @@ makelist()
 	done
 
 	dialog --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
+  echo
 }
 
 
@@ -35,7 +36,6 @@ if [[ "$(whoami)" != "root" ]]; then
   exit 1
 else
 	makelist
-  clear
 	makefile
 	cleanup
 fi
