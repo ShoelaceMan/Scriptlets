@@ -1,0 +1,39 @@
+#!/bin/bash
+tmpfile=$(mktemp)
+genfile='/etc/modprobe.d/vfioselect.conf' 	# modify this to use a different config location
+
+cleanup()
+{
+	rm $tmpfile
+}
+
+makelist()
+{
+	IFS=$'\n' 	# make newlines the only separator
+	for pci in $(lspci -n | awk '{print $3}')
+	do
+    if grep -q $pci "$genfile"; then
+      menuitems+=("$pci" "$(lspci -nn | grep $pci)" "on")
+    else
+		  menuitems+=("$pci" "$(lspci -nn | grep $pci)" "off")
+    fi
+	done
+
+	dialog --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
+}
+
+
+makefile()
+{
+	echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
+}
+
+#Check for root access
+if [[ "$(whoami)" != "root" ]]; then
+  echo "This program requires root access."
+  exit 1
+else
+	makelist
+	makefile
+	cleanup
+fi
