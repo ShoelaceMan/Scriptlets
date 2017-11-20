@@ -20,8 +20,7 @@ makelist()
     fi
 	done
 
-	dialog --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
-  echo
+	dialog --keep-tite --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
 }
 
 
