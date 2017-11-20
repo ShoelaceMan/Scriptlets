@@ -9,6 +9,7 @@ cleanup()
 
 makelist()
 {
+  touch $genfile
 	IFS=$'\n' 	# make newlines the only separator
 	for pci in $(lspci -n | awk '{print $3}')
 	do
@@ -34,6 +35,7 @@ if [[ "$(whoami)" != "root" ]]; then
   exit 1
 else
 	makelist
+  clear
 	makefile
 	cleanup
 fi
