@@ -30,6 +30,7 @@ makefile()
     echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
   else
     dialog
+    exit 1
   fi
 }
 
