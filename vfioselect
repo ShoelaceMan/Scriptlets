@@ -85,7 +85,7 @@ bind()
   # rmmod drivers if nothing else is using it
   for mod in ${rmkd[@]}; do
     if [[ -z $(lspci -nnk | grep $mod) ]]; then
-      rmmod ${rmkd[@]}
+      rmmod $mod
     fi
   done
 }
