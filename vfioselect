@@ -4,7 +4,7 @@
 #
 
 tmpfile=$(mktemp)
-genfile='/etc/modprobe.d/vfioselect.conf' 	# modify this to use a different config location
+genfile='/etc/modprobe.d/vfioselect.conf'
 online=false
 
 usage()
@@ -18,7 +18,11 @@ usage()
 
 cleanup()
 {
-  rm $tmpfile $genfile.old
+  rm $tmpfile
+
+  if [ -e $genfile.old ]; then
+    rm $genfile.old
+  fi
 }
 
 makelist()
@@ -39,7 +43,13 @@ makelist()
     fi
   done
 
-  dialog --keep-tite --checklist "Choose which devices to bind:" 30 180 30 "${menuitems[@]}" 2>$tmpfile
+  if dialog --keep-tite --checklist \
+      "Choose which devices to bind:" 30 180 30 \
+      "${menuitems[@]}" 2>$tmpfile; then
+    return 0
+  else
+    return 1
+  fi
 }
 
 
@@ -47,26 +57,94 @@ makefile()
 {
   if which dialog > /dev/null ; then
     echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
+    echo "$genfile written successfully."
   else
     dialog
     exit 1
   fi
 }
 
-online()
+bind()
 {
-  echo "Functionality not yet implemented."
+  #Unbind from device drivers, and bind to VFIO
+  echo "Bind functionality not yet implemented."
+  #Comment out, or remove the exit 1 if you want to be a test mule
+  exit 1
 
+  for id in ${bindids[@]};do
+    #Get pci slot
+    pci=$(lspci -Dd $id | grep -Eoh "[0-9]{4}:[0-9]{2}:[0-9a-f]{2}\.[0-9]")
+    rmkd+=("$(lspci -ks $pci | awk '{print $5}' | tail -n1)")
+    #Rebinding process
+    echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo "$pci" > /sys/bus/pci/devices/$pci/driver/unbind
+    echo "$pci" > /sys/bus/pci/drivers/vfio-pci/bind
+    echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/remove_id
+  done
+
+  # rmmod drivers if nothing else is using it
+  for mod in ${rmkd[@]}; do
+    if [[ -z $(lspci -nnk | grep $mod) ]]; then
+      rmmod ${rmkd[@]}
+    fi
+  done
 }
 
 unbind()
 {
+  # Unbind from VFIO, and bind to device drivers
+  for id in ${unbindids[@]};do
+    echo $id
+  done
+
   echo "Unbind functionality not yet implemented."
+  exit 1
+
+  echo "10de 13c2" > /sys/bus/pci/drivers/vfio-pci/remove_id
+  echo "10de 0fbb" > /sys/bus/pci/drivers/vfio-pci/remove_id
+
+  echo 1 > /sys/bus/pci/devices/0000:01:00.0/remove
+  echo 1 > /sys/bus/pci/devices/0000:01:00.1/remove
+  echo 1 > /sys/bus/pci/rescan
+
+  modprobe nvidia
 }
 
-bind()
+online()
 {
-  echo "Bind functionality not yet implemented."
+  #Get list of new and old ID's
+  for id in $(grep -Eoh "[0-9a-z]{4}:[0-9a-z]{4}" $genfile); do
+    newids+=("$id")
+  done
+  for id in $(grep -Eoh "[0-9a-z]{4}:[0-9a-z]{4}" $genfile.old); do
+    oldids+=("$id")
+  done
+
+  #Get list of different ID's, determine what to do with them
+  for id in $(echo ${newids[@]} ${oldids[@]} | sed 's/ /\n/g'| sort | uniq -u)
+  do
+    diffids+=("$id")
+  done
+  for id in $(echo ${diffids[@]} ${oldids[@]} | sed 's/ /\n/g'| sort | uniq -d)
+  do
+    unbindids+=("$id")
+  done
+  for id in $(echo ${diffids[@]} ${newids[@]} | sed 's/ /\n/g'| sort | uniq -d)
+  do
+    bindids+=("$id")
+  done
+
+  echo "Bind:   ${bindids[@]}"
+  echo "Unbind: ${unbindids[@]}"
+  echo
+
+  #Bind/Unbind the ID's respectively
+  if [[ ${bindids[@]} ]]; then
+    bind
+  fi
+  if [[ ${unbindids[@]} ]]; then
+    unbind
+  fi
 }
 
 #Check arguments
@@ -92,8 +170,12 @@ if [[ "$(whoami)" != "root" ]]; then
   echo "This program requires root access."
   exit 1
 else
-  makelist
-  makefile
+  if makelist; then
+    makefile
+  else
+    cleanup
+    exit 130
+  fi
   if $online; then
     online
   fi
