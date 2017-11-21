@@ -1,22 +1,41 @@
 #!/bin/bash
+# Script to bind the VFIO stub driver to PCI devices
+# By Trent Arcuri, 2017
+#
+
 tmpfile=$(mktemp)
 genfile='/etc/modprobe.d/vfioselect.conf' 	# modify this to use a different config location
+online=false
+
+usage()
+{
+  echo """Usage: $(basename $0) [<arguments>]
+  -t,--tmpfile  <path>   Specify path to temporary file
+  -g,--genfile  <path>   Specify path to modprobe rule
+  -o,--online            Attempt to bind/unbind without the need to reboot
+  -h,--help              Display this help dialogue"""
+}
 
 cleanup()
 {
-  rm $tmpfile
+  rm $tmpfile $genfile.old
 }
 
 makelist()
 {
-  touch $genfile
+  if [ -e $genfile ]; then
+    cp $genfile $genfile.old
+  else
+    touch $genfile
+  fi
+
   IFS=$'\n' 	# make newlines the only separator
   for pci in $(lspci -n | awk '{print $3}')
   do
     if grep -qi $pci "$genfile"; then
-      menuitems+=("$pci" "$(lspci -nn | grep $pci)" "on")
+      menuitems+=("$pci" "$(lspci -d $pci)" "on")
     else
-      menuitems+=("$pci" "$(lspci -nn | grep $pci)" "off")
+      menuitems+=("$pci" "$(lspci -d $pci)" "off")
     fi
   done
 
@@ -34,6 +53,40 @@ makefile()
   fi
 }
 
+online()
+{
+  echo "Functionality not yet implemented."
+
+}
+
+unbind()
+{
+  echo "Unbind functionality not yet implemented."
+}
+
+bind()
+{
+  echo "Bind functionality not yet implemented."
+}
+
+#Check arguments
+while [ "$1" != "" ]; do
+  case $1 in
+    -t | --tmpfile )  shift
+                      cleanup
+                      tmpfile=$1
+                      ;;
+    -g | --genfile )  shift
+                      genfile=$1
+                      ;;
+    -o | --online )   online=true
+                      ;;
+    -h | --help )     usage
+                      exit
+  esac
+  shift
+done
+
 #Check for root access
 if [[ "$(whoami)" != "root" ]]; then
   echo "This program requires root access."
@@ -41,5 +94,8 @@ if [[ "$(whoami)" != "root" ]]; then
 else
   makelist
   makefile
+  if $online; then
+    online
+  fi
   cleanup
 fi
