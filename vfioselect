@@ -93,19 +93,19 @@ bind()
 unbind()
 {
   # Unbind from VFIO, and bind to device drivers
-  for id in ${unbindids[@]};do
-    echo $id
-  done
-
   echo "Unbind functionality not yet implemented."
+  #Comment out, or remove the exit 1 if you want to be a test mule
   exit 1
 
-  echo "10de 13c2" > /sys/bus/pci/drivers/vfio-pci/remove_id
-  echo "10de 0fbb" > /sys/bus/pci/drivers/vfio-pci/remove_id
-
-  echo 1 > /sys/bus/pci/devices/0000:01:00.0/remove
-  echo 1 > /sys/bus/pci/devices/0000:01:00.1/remove
-  echo 1 > /sys/bus/pci/rescan
+  for id in ${unbindids[@]};do
+    #Get pci slot
+    pci=$(lspci -Dd $id | grep -Eoh "[0-9]{4}:[0-9]{2}:[0-9a-f]{2}\.[0-9]")
+    rmkd+=("$(lspci -ks $pci | awk '{print $5}' | tail -n1)")
+    #Rebinding process
+    echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo 1 > /sys/bus/pci/devices/$pci/remove
+    echo 1 > /sys/bus/pci/rescan
+  done
 
   modprobe nvidia
 }
