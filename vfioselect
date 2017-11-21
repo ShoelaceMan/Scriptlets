@@ -13,7 +13,7 @@ makelist()
   IFS=$'\n' 	# make newlines the only separator
   for pci in $(lspci -n | awk '{print $3}')
   do
-    if grep -q $pci "$genfile"; then
+    if grep -qi $pci "$genfile"; then
       menuitems+=("$pci" "$(lspci -nn | grep $pci)" "on")
     else
       menuitems+=("$pci" "$(lspci -nn | grep $pci)" "off")
