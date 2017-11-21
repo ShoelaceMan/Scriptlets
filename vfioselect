@@ -26,7 +26,11 @@ makelist()
 
 makefile()
 {
-  echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
+  if which dialog > /dev/null ; then
+    echo "options vfio-pci ids=$(cat $tmpfile | sed 's/\ /,/g')" > $genfile
+  else
+    dialog
+  fi
 }
 
 #Check for root access
