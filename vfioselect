@@ -147,37 +147,73 @@ online()
   fi
 }
 
-#Check arguments
-while [ "$1" != "" ]; do
-  case $1 in
-    -t | --tmpfile )  shift
-                      cleanup
-                      tmpfile=$1
-                      ;;
-    -g | --genfile )  shift
-                      genfile=$1
-                      ;;
-    -o | --online )   online=true
-                      ;;
-    -h | --help )     usage
-                      exit
-  esac
-  shift
-done
+main()
+{
+	local argv=("$@");
+	# argc is the count of arguments
+	local argc=${#argv[@]};
 
-#Check for root access
-if [[ "$(whoami)" != "root" ]]; then
-  echo "This program requires root access."
-  exit 1
-else
-  if makelist; then
-    makefile
-  else
-    cleanup
-    exit 130
-  fi
-  if $online; then
-    online
-  fi
-  cleanup
-fi
+	# this is important to ensure globbing is active
+	shopt -s extglob;
+
+	# Handle compressed short options
+	re="(^| )\\-[[:alnum:]]{2,}"; # regex to detect shortoptions
+	# we evaluate this as a long string, thus ${argv[*]}, instead of ${argv[@]}
+	if [[ "${argv[*]}" =~ $re ]]; then
+		local compiled_args=();
+		for ((i=0; i<argc; i++)); do
+			if [[ "${argv[$i]}" =~ $re ]]; then
+				local compressed_args="${argv[$i]#*-}";
+				for ((r=0; r<${#compressed_args}; r++)); do
+					compiled_args+=("-${compressed_args:$r:1}");
+				done
+				shift;
+				compiled_args+=("$@");
+				## recurse
+				main "${compiled_args[@]}";
+				## we "pass" the exit code back up the recursions to the OS
+				exit $?;
+			fi
+			compiled_args+=("${argv[$i]}");
+			shift;
+		done
+		exit;
+	fi
+
+	#Check arguments
+	while [ "$1" != "" ]; do
+		case $1 in
+			-t | --tmpfile )  shift
+												cleanup
+												tmpfile=$1
+												;;
+			-g | --genfile )  shift
+												genfile=$1
+												;;
+			-o | --online )   online=true
+												;;
+			-h | --help )     usage
+												exit
+		esac
+		shift
+	done
+
+	#Check for root access
+	if [[ "$(whoami)" != "root" ]]; then
+		echo "This program requires root access."
+		exit 1
+	else
+		if makelist; then
+			makefile
+		else
+			cleanup
+			exit 130
+		fi
+		if $online; then
+			online
+		fi
+		cleanup
+	fi
+}
+
+main "$@"
