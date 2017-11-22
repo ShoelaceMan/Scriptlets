@@ -184,23 +184,27 @@ main()
 	#Check arguments
 	while [ "$1" != "" ]; do
 		case $1 in
-			-t | --tmpfile )  shift
-												cleanup
-												tmpfile=$1
-												;;
-			-g | --genfile )  shift
-												genfile=$1
-												;;
-			-o | --online )   online=true
-												;;
-			-h | --help )     usage
-												exit
+			-t | --tmpfile )
+				shift
+				cleanup
+				tmpfile=$1
+				;;
+			-g | --genfile )
+				shift
+				genfile=$1
+				;;
+			-o | --online )
+				online=true
+				;;
+			-h | --help )
+				usage
+				exit
 		esac
 		shift
 	done
 
 	#Check for root access
-	if [[ "$(whoami)" != "root" ]]; then
+	if [[ $EUID -ne 0 ]]; then
 		echo "This program requires root access."
 		exit 1
 	else
