@@ -14,18 +14,18 @@ pid()
 
 makeList()
 {
-	for i in $(pid); do
-		pstree $i | sed -n "s/^screen/$i/;1p"
-	done | awk '{printf("%5d %s\n", NR,$0)}'
+  for i in $(pid); do
+    pstree $i | sed -n "s/^screen/$i/;1p"
+  done | awk '{printf("%5d %s\n", NR,$0)}'
 }
 
 if [[ -z $(makeList) ]]; then
-  echo "There are no detached screens on $(hostname)."
+  echo "There are no $target screens on $(hostname)."
   exit 1
 else
-	dialog --keep-tite --menu "Choose one:" 15 70 10 \
-	    $(makeList) 2>$TMPFILE
-	RESULT=$(cat $TMPFILE)
+  dialog --keep-tite --menu "Choose one:" 15 70 10 \
+    $(makeList) 2>$TMPFILE
+  RESULT=$(cat $TMPFILE)
 fi
 
 if [ -z $RESULT ]; then
