@@ -73,7 +73,7 @@ bind()
 
   for id in ${bindids[@]};do
     #Get pci slot
-    pci=$(lspci -Dd $id | grep -Eoh "[0-9]{4}:[0-9]{2}:[0-9a-f]{2}\.[0-9]")
+    pci=$(lspci -Dd $id|grep -Eoh "[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-9]")
     pcipath="/sys/bus/pci/devices/$pci"
     rmkd+=("$(stat $pcipath/driver -c %N|awk -F/ '{print $NF}'|sed "s/'//")")
     #Rebinding process
@@ -100,15 +100,12 @@ unbind()
 
   for id in ${unbindids[@]};do
     #Get pci slot
-    pci=$(lspci -Dd $id | grep -Eoh "[0-9]{4}:[0-9]{2}:[0-9a-f]{2}\.[0-9]")
+    pci=$(lspci -Dd $id|grep -Eoh "[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-9]")
     rmkd+=("$(lspci -ks $pci | awk '{print $5}' | tail -n1)")
     #Rebinding process
-    echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/remove_id
     echo 1 > /sys/bus/pci/devices/$pci/remove
     echo 1 > /sys/bus/pci/rescan
   done
-
-  modprobe nvidia
 }
 
 online()
@@ -150,6 +147,15 @@ online()
 
 main()
 {
+  #Check dependencies
+  if which dialog > /dev/null ; then
+    sleep
+  else
+    dialog
+    exit 1
+  fi
+
+  #Argument formatting
 	local argv=("$@");
 	# argc is the count of arguments
 	local argc=${#argv[@]};
@@ -198,7 +204,7 @@ main()
 				;;
 			-h | --help )
 				usage
-				exit
+        exit
 		esac
 		shift
 	done
