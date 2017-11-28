@@ -1,10 +1,14 @@
 #!/bin/bash
 TMPFILE=$(mktemp)
 
+pid()
+{
+  screen -ls|grep $(hostname)|grep 'Detached'|awk -F. '{print $1}'|sed 's/^[ \t]*//'
+}
+
 makeList()
 {
-  pid=$(screen -ls|grep $(hostname)|grep 'Detached'|awk -F. '{print $1}'|sed "s/^[ \t]*//")
-	for i in $(echo $pid); do
+	for i in $(pid); do
 		pstree $i | sed -n "s/^screen/$i/;1p"
 	done | awk '{printf("%5d %s\n", NR,$0)}'
 }
@@ -21,8 +25,8 @@ fi
 if [ -z $RESULT ]; then
   exit 0
 else
-  RESULT=$(screen -ls|grep $(hostname)|awk '{print $1}'|awk "NR==$RESULT")
-  screen -Dr $(screen -ls|sed -n "$RESULT p"|awk '{print $1}')
+  RESULT=$(pid|awk "NR==$RESULT")
+  screen -Dr $RESULT
 fi
 
 rm $TMPFILE
