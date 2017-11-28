@@ -145,7 +145,7 @@ main()
 {
   #Check dependencies
   if which dialog > /dev/null ; then
-    sleep
+    :
   else
     dialog
     exit 1
@@ -201,6 +201,9 @@ main()
 			-h | --help )
 				usage
         exit
+        ;;
+      -?*)
+        printf 'WARN: Unknown option (ignored): %s\n' "$1" >&2
 		esac
 		shift
 	done
