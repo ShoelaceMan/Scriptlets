@@ -1,32 +1,188 @@
-#! /bin/bash
+#!/bin/bash
+# Script to backup selected folders, made for cron
+# By Trent Arcuri, 2017
 
-secs=$((10 * 60))
+secs=10
+log=/var/log/backup.log
+target=/
+bupdir=/mnt/backup
+bupname=$(hostname)
+bupmeth=rsync
 
-if [[ $EUID -ne 0  ]]; then
-  echo "$(basename $0) must be run as root"
-  exit 1
-fi
+rsyncoptions=(
+-Pauvr
+--delete
+)
 
+exclude=(
+"/dev/*"
+"/proc/*"
+"/sys/*"
+"/tmp/*"
+"/run/*"
+"/mnt/*"
+"/media/*"
+"/lost+found"
+)
 
-echo "##############################################################"
-hostname
-date
+banner=(
+"name: $bupname"
+#"method: $bupmeth"
+)
 
-if [ -e /tmp/nobackup ]; then
-  echo "/tmp/nobackup exists, backup canceled."
+usage()
+{
+  echo """Usage: $(basename $0) [<arguments>]
+  -b,--banner <text>          Add text to end of banner in log file
+  -s,--sleep <time>           Specify minutes to show warning before continuing
+  -n,--name <name>            Specify name for this backup
+  -l,--log <path>             Specify path to log file
+  -t,--target <path>          Specify what to backup
+  -d,--directory <path>       Specify where to backup to
+  -x,--skip                   Skip next backup
+  -h,--help <path>            Display this help dialogue"""
+}
+
+cleanup()
+{
   rm -rf /tmp/nobackup
-  echo
-  exit 1
-fi
+  printf "\n\nbackup logging stopped at $(date)\n\n" >> $log
+}
 
-xmessage -timeout $secs -nearmous -buttons "run,cancel" "Performing backup in $(($secs / 60)) minutes."
 
-if [ $? -eq 102  ]; then
-  echo "User cancelled backup"
-else
-  echo "Running backup"
-  rsync -aAXv --delete --exclude={"/dev/*","/proc/*","/sys/*","/tmp/*","/run/*","/mnt/*","/media/*","/lost+found"} / /mnt/backup/$(hostname)
-  sudo tar -pvczf /mnt/backup/tarballs/$(hostname).tar.gz -C /mnt/backup/$(hostname) .
-  echo "Backup completed at $(date)"
-fi
-echo
+
+banner()
+{
+  IFS=''
+  printf "\nbackup logging started at $(date)\n\n" >> $log
+  for text in ${@}; do
+    echo $text
+  done
+}
+
+rbackup()
+{
+  xmessage -timeout $(($secs * 60)) -nearmous -buttons \
+    "run,cancel" "Performing backup in $secs minutes."
+
+  if [ $? -eq 102  ]; then
+    echo "User cancelled backup"
+  else
+    echo "Running backup"
+    rsync "${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir/$bupname
+  fi
+}
+
+premain()
+{
+  #Argument formatting
+  local argv=("$@");
+  # argc is the count of arguments
+  local argc=${#argv[@]};
+
+  # this is important to ensure globbing is active
+  shopt -s extglob;
+
+  # Handle compressed short options
+  re="(^| )\\-[[:alnum:]]{2,}"; # regex to detect shortoptions
+  # we evaluate this as a long string, thus ${argv[*]}, instead of ${argv[@]}
+  if [[ "${argv[*]}" =~ $re ]]; then
+    local compiled_args=();
+    for ((i=0; i<argc; i++)); do
+      if [[ "${argv[$i]}" =~ $re ]]; then
+        local compressed_args="${argv[$i]#*-}";
+        for ((r=0; r<${#compressed_args}; r++)); do
+          compiled_args+=("-${compressed_args:$r:1}");
+        done
+        shift;
+        compiled_args+=("$@");
+        ## recurse
+        premain "${compiled_args[@]}";
+        ## we "pass" the exit code back up the recursions to the OS
+        exit $?;
+      fi
+      compiled_args+=("${argv[$i]}");
+      shift;
+    done
+    exit;
+  fi
+
+  #Check arguments
+  while [ "$1" != "" ]; do
+    case $1 in
+      -s | --sleep )
+        shift
+        secs=$(($1 * 60))
+        ;;
+      -n | --name )
+        shift
+        bupname=$1
+        ;;
+      -l | --log )
+        shift
+        log=$1
+        ;;
+      -t | --target )
+        shift
+        target=$1
+        ;;
+      -d | --directory )
+        shift
+        bupdir=$1
+        ;;
+      -x | --skip )
+        if [ ! -f /tmp/nobackup  ];then
+          echo "Skipping next backup."
+          touch /tmp/nobackup
+        else
+          echo "Canceled backup skipping."
+          rm /tmp/nobackup
+        fi
+        exit
+        ;;
+      -b | --banner )
+        shift
+        banner+=("$1")
+        ;;
+      -h | --help )
+        usage
+        exit
+        ;;
+      -?*)
+        printf 'WARN: Unknown option (ignored): %s\n' "$1" >&2
+    esac
+    shift
+  done
+
+  #Format excludes
+  for i in "${!exclude[@]}"; do
+    exclude[i]="--exclude=${exclude[i]}"
+  done
+
+  #Check for root access
+  if [[ $EUID -ne 0  ]]; then
+    echo "$(basename $0) must be run as root."
+    exit 1
+  else
+    # Log maintenance
+    find $(dirname $log) -name $(basename $log) -size +2500000c
+    #Program entry point
+    main "$@" | tee -a $log
+  fi
+}
+
+main()
+{
+  # Check for skip file
+  if [ -e /tmp/nobackup ]; then
+    echo "/tmp/nobackup exists, backup canceled."
+    cleanup
+    exit 1
+  fi
+
+  banner "${banner[@]}"
+  rbackup
+  cleanup
+}
+
+premain "$@"
