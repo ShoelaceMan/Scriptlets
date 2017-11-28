@@ -1,8 +1,6 @@
 # Scriptlets
 ### backup ###
-Pretty self explanatory, it backs up your whole system using rsync, and makes a tar after.
-### cheatsheet ###
-Just things that I usually forget, and want to remember.
+Pretty self explanatory, it backs up using rsync.
 ### cpanlicense ###
 Checks status of a cpanel license
 ### dmenu-launch ###
@@ -15,12 +13,12 @@ Actually doesn't even use feh, but it makes image viewing nicer than before.
 Either updates all git repo's in your drive, or only the specified directory.
 ### movemouserelativewin ###
 Moves the mouse to the center of focused window, good for tiling wm's.
-### passthroughtest ###
-Lists PCI devices that can be passed through using VFIO.
+### lsiommu ###
+Lists PCI devices, and shows their IOMMU groupings.
 ### sandbox ###
 Runs commands as user with no permissions, and a home in /tmp/
 ### screendr ###
-Uses menu to show an interactive list of detached screen sessions.
+Uses menu to show an interactive list of screen sessions.
 ### screenify ###
 Either connects to a screen running a command, or creates a new one.
 ### smartde ###
