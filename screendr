@@ -3,25 +3,26 @@ TMPFILE=$(mktemp)
 
 makeList()
 {
-  screen -ls | grep 'Detached' | awk '{print $1}' | awk '{printf("%5d %s\n", NR,$0)}'
+  pid=$(screen -ls|grep $(hostname)|grep 'Detached'|awk -F. '{print $1}'|sed "s/^[ \t]*//")
+	for i in $(echo $pid); do
+		pstree $i | sed -n "s/^screen/$i/;1p"
+	done | awk '{printf("%5d %s\n", NR,$0)}'
 }
 
-if [ -z $(makeList) ]; then
+if [[ -z $(makeList) ]]; then
   echo "There are no detached screens on $(hostname)."
   exit 1
+else
+	dialog --keep-tite --menu "Choose one:" 15 70 10 \
+	    $(makeList) 2>$TMPFILE
+	RESULT=$(cat $TMPFILE)
 fi
-
-dialog --menu "Choose one:" 15 50 10 \
-    $(makeList) 2>$TMPFILE
-
-cat $TMPFILE
-RESULT=$(cat $TMPFILE)
 
 if [ -z $RESULT ]; then
   exit 0
 else
-  RESULT=$(screen -ls | grep $(hostname) | awk '{print $1}' | awk "NR==$RESULT")
-  screen -Dr $(screen -ls | grep 'Detached' | awk '{print $1}' | awk '{printf("%5d %s\n", NR,$0)}' | grep $(cat $TMPFILE) | awk '{print $2}')
+  RESULT=$(screen -ls|grep $(hostname)|awk '{print $1}'|awk "NR==$RESULT")
+  screen -Dr $(screen -ls|sed -n "$RESULT p"|awk '{print $1}')
 fi
 
 rm $TMPFILE
