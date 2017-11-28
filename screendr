@@ -1,9 +1,15 @@
 #!/bin/bash
 TMPFILE=$(mktemp)
 
+if [[ "$1" == "-a" ]]; then
+  target=Attached
+else
+  target=Detached
+fi
+
 pid()
 {
-  screen -ls|grep $(hostname)|grep 'Detached'|awk -F. '{print $1}'|sed 's/^[ \t]*//'
+  screen -ls|grep $(hostname)|grep $target|awk -F. '{print $1}'|sed 's/^[ \t]*//'
 }
 
 makeList()
