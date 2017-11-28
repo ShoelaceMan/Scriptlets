@@ -67,9 +67,7 @@ makefile()
 bind()
 {
   #Unbind from device drivers, and bind to VFIO
-  echo "Bind functionality not yet implemented."
-  #Comment out, or remove the exit 1 if you want to be a test mule
-  exit 1
+  echo "Bind functionality is in beta, please report bugs!"
 
   for id in ${bindids[@]};do
     #Get pci slot
@@ -94,9 +92,7 @@ bind()
 unbind()
 {
   # Unbind from VFIO, and bind to device drivers
-  echo "Unbind functionality not yet implemented."
-  #Comment out, or remove the exit 1 if you want to be a test mule
-  exit 1
+  echo "Unbind functionality is in beta, please report bugs!"
 
   for id in ${unbindids[@]};do
     #Get pci slot
