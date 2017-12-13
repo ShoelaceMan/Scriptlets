@@ -80,13 +80,6 @@ bind()
     echo "$pci" > /sys/bus/pci/drivers/vfio-pci/bind
     echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/remove_id
   done
-
-  # rmmod drivers if nothing else is using it
-  for mod in ${rmkd[@]}; do
-    if [[ -z $(lspci -nnk | grep $mod) ]]; then
-      rmmod $mod
-    fi
-  done
 }
 
 unbind()
