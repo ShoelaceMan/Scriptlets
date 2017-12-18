@@ -6,8 +6,11 @@ secs=10
 log=/var/log/backup.log
 target=/
 bupdir=/mnt/backup
+incname=$(date +%F-%T)
+incnumc=2
 bupname=$(hostname)
 bupmeth=rsync
+buptype=b
 
 rsyncoptions=(
 -Pauvr
@@ -39,6 +42,8 @@ usage()
   -l,--log <path>             Specify path to log file
   -t,--target <path>          Specify what to backup
   -d,--directory <path>       Specify where to backup to
+  -m,--method <method>        Specify which method to use
+  -a,--type <type> <args>     Specify how to manage snapshots
   -x,--skip                   Skip next backup
   -h,--help <path>            Display this help dialogue"""
 }
@@ -46,10 +51,9 @@ usage()
 cleanup()
 {
   rm -rf /tmp/nobackup
-  printf "\n\nbackup logging stopped at $(date)\n\n" >> $log
+  touch $bupdir/$bupname
+  printf "\n\n$bupname logging stopped at $(date)\n\n" >> $log
 }
-
-
 
 banner()
 {
@@ -60,17 +64,18 @@ banner()
   done
 }
 
-rbackup()
+increment()
 {
-  xmessage -timeout $(($secs * 60)) -nearmous -buttons \
-    "run,cancel" "Performing backup in $secs minutes."
-
-  if [ $? -eq 102  ]; then
-    echo "User cancelled backup"
-  else
-    echo "Running backup"
-    rsync "${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir/$bupname
+  oldestb=$(find $bupdir/* -maxdepth 0 -type d -printf '%A+ %p\n'|sort|sed 1q)
+  if [[ $(find $bupdir/* -maxdepth 0 -type d|wc -l) -gt $incnumc ]];then
+    rm -rf $(echo $oldestb|awk '{print $NF}')
   fi
+  bupname="$bupname-$(date +%F-%T)"
+}
+
+rsyncb()
+{
+  rsync "${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir/$bupname
 }
 
 premain()
@@ -144,6 +149,16 @@ premain()
         shift
         banner+=("$1")
         ;;
+      -a | --type )
+        shift
+        case $1 in
+          b)
+            : # Do nothing
+            ;;
+          i)
+            increment
+        esac
+        ;;
       -h | --help )
         usage
         exit
@@ -173,15 +188,25 @@ premain()
 
 main()
 {
+  # Display banner in log
+  banner "${banner[@]}"
   # Check for skip file
   if [ -e /tmp/nobackup ]; then
     echo "/tmp/nobackup exists, backup canceled."
     cleanup
     exit 1
   fi
+  # Display warning and cancel button
+  xmessage -timeout $(($secs * 60)) -nearmous -buttons \
+    "run,cancel" "Performing backup in $secs minutes."
+  if [ $? -eq 102  ]; then
+    echo "User cancelled backup"
+  else
+    echo "Running backup"
+    $method$type
+    rsync "${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir/$bupname
+  fi
 
-  banner "${banner[@]}"
-  rbackup
   cleanup
 }
 
