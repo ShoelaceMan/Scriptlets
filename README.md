@@ -7,8 +7,6 @@ Checks status of a cpanel license
 Runs commands using dmenu.
 ### dvol ###
 dmenu volume controller, edited from dotfiles.it
-### feh ###
-Actually doesn't even use feh, but it makes image viewing nicer than before.
 ### gitupdate ###
 Either updates all git repo's in your drive, or only the specified directory.
 ### movemouserelativewin ###
