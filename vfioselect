@@ -75,10 +75,10 @@ bind()
     pcipath="/sys/bus/pci/devices/$pci"
     rmkd+=("$(stat $pcipath/driver -c %N|awk -F/ '{print $NF}'|sed "s/'//")")
     #Rebinding process
-    echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/new_id
-    echo "$pci" > /sys/bus/pci/devices/$pci/driver/unbind
-    echo "$pci" > /sys/bus/pci/drivers/vfio-pci/bind
-    echo "$id" | sed 's/:/ /' > /sys/bus/pci/drivers/vfio-pci/remove_id
+    if [ -e /sys/bus/pci/devices/$pci/driver ]; then
+      echo "$pci" > /sys/bus/pci/devices/$pci/driver/unbind
+    fi
+    echo "$id"|sed 's/:/ /'> /sys/bus/pci/drivers/vfio-pci/new_id
   done
 }
 
