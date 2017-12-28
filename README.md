@@ -19,9 +19,5 @@ Runs commands as user with no permissions, and a home in /tmp/
 Uses menu to show an interactive list of screen sessions.
 ### screenify ###
 Either connects to a screen running a command, or creates a new one.
-### smartde ###
-I use this for per-user configuration in lightdm.
 ### wpvuln ###
 For testing vulnerabilities, pretty niche.
-### vfioselect ###
-Makes assigning PCI devices to vfio-pci a bit easier.
