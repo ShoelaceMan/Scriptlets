@@ -21,3 +21,5 @@ Uses menu to show an interactive list of screen sessions.
 Either connects to a screen running a command, or creates a new one.
 ### wpvuln ###
 For testing vulnerabilities, pretty niche.
+### paraxinit ###
+Runs first argument in a new X session on a different TTY

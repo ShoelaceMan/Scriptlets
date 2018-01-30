@@ -1,0 +1,8 @@
+#!/bin/bash
+if [ $# -ge 1 ]; then
+	DISPLAY=:1.0
+	echo "starting ${game}"
+	xinit $(which $1) -- :1 -xf86config xorg-game.conf || exit 1
+else
+	echo "not a valid argument"
+fi
