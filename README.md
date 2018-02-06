@@ -23,3 +23,5 @@ Either connects to a screen running a command, or creates a new one.
 For testing vulnerabilities, pretty niche.
 ### paraxinit ###
 Runs first argument in a new X session on a different TTY
+### dwmwhile ###
+Runs dwm in a while loop, to restart easily
