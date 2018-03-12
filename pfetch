@@ -1,0 +1,66 @@
+#!/bin/bash
+#Show terminal colors
+pcs() {
+  for i in {0..7}; do
+    echo -en "\e[${1}$((30+$i))m \u2588\u2588 \e[0m"
+  done
+}
+
+# Main information fetching
+WM="dwm"
+host="$(hostname)"
+os='Parabola GNU/Linux'
+kernel="$(uname -sr)"
+uptime="$(uptime -p | sed 's/up //')"
+packages="$(pacman -Q | wc -l)"
+shell="$(basename ${SHELL})"
+if [ -z "${WM}" ]; then
+  WM="$(tail -n 1 "${HOME}/.xinitrc" | cut -d ' ' -f 2)"
+fi
+cpu="$(awk 'BEGIN{FS=":"} /model name/ { print $2; exit  }' /proc/cpuinfo|awk 'BEGIN{FS=" @"; OFS="\n"} { print $1; exit  }')"
+ram="$(free -hm|grep Mem:|awk '{print $3" / "$2}')"
+
+#non-color effects
+bc="$(tput bold)"		  # bold
+rc="$(tput sgr0)"		  # rc
+ul="$(tput smul)"		  # rc
+lu="$(tput rmul)"		  # rc
+#foreground colors
+c0="$(tput setaf 0)"	# black
+c1="$(tput setaf 1)"	# red
+c2="$(tput setaf 2)"	# green
+c3="$(tput setaf 3)"	# yellow
+c4="$(tput setaf 4)"	# blue
+c5="$(tput setaf 5)"	# magenta
+c6="$(tput setaf 6)"	# cyan
+c7="$(tput setaf 7)"	# white
+#background colors
+bc0="$(tput setab 0)"	# black
+bc1="$(tput setab 1)"	# red
+bc2="$(tput setab 2)"	# green
+bc3="$(tput setab 3)"	# yellow
+bc4="$(tput setab 4)"	# blue
+bc5="$(tput setab 5)"	# magenta
+bc6="$(tput setab 6)"	# cyan
+bc7="$(tput setab 7)"	# white
+
+# Text and logo colors
+lc="${bc}${c5}"      	# labels
+nc="${ul}${bc}${c5}"	# user and hostname
+ic="${rc}${bc}${c7}"	# info
+
+#Draw ascii art and print fetch
+cat << EOF
+ ${bc}${c7}       ${rc}         ${nc}${USER}${ic}@${nc}${host}${rc}
+ ${bc}${c7}    ▄▄▄${rc}         ${lc}OS:        ${ic}${os}${rc}
+ ${bc}${c7} ▄█████▄▄ ${rc}      ${lc}KERNEL:    ${ic}${kernel}${rc}
+ ${bc}${c7}███${bc6}▀▀▀▀${bc0}▀${bc6}▀${bc0}▀${bc6}▀${rc}     ${lc}UPTIME:    ${ic}${uptime}${rc}
+ ${bc}${c7}███${bc6}▄   ${c0}▀ ▀${rc}${c6}▀${rc}     ${lc}PACKAGES:  ${ic}${packages}${rc}
+ ${bc}${c7} ▄${bc6}  ${rc}${bc}${c7}█████▄ ${rc}${c1}█▄${rc}   ${lc}SHELL:     ${ic}${shell}${rc}
+ ${rc}${c1}▀▀${rc}${bc}${bc1}${c7}▄${bc6}▄   ${bc1}▄▄▄${rc}${c1}▀██▀${rc}  ${lc}WM:        ${ic}${WM}${rc}
+ ${bc}${c7} ██▀▀▀██▀  ${rc}${c1}▀${rc}    ${lc}CPU:      ${ic}${cpu}${rc}
+ ${bc}${c7} ▀▀▀▀ ▀▀▀▀${rc}      ${lc}RAM:       ${ic}${ram}${rc}
+EOF
+
+# Show terminal colors
+printf "\n%s\n%s\n\n" "$(pcs)" "$(pcs '1;')"
