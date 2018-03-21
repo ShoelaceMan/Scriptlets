@@ -8,13 +8,13 @@ pcs() {
 
 # Main information fetching
 host="$(hostname)"
-os=$(grep "PRETTY_NAME" /etc/os-release |  awk -F '"' 'NF>2{print $2}')
+os=$(grep "PRETTY_NAME" /etc/os-release|awk -F '"' 'NF>2{print $2}')
 kernel="$(uname -sr)"
-uptime="$(uptime -p | sed 's/up //')"
-packages="$(pacman -Q | wc -l)"
+uptime="$(uptime -p|sed 's/up //')"
+packages="$(pacman -Q|wc -l)"
 shell="$(basename ${SHELL})"
-wm=$(xprop -id $(xprop -root -notype | awk '$1=="_NET_SUPPORTING_WM_CHECK:"{print $5}') -notype -f _NET_WM_NAME 8t | awk -F '"' 'NF>2{print $2}')
-cpu="$(awk 'BEGIN{FS=":"} /model name/ { print $2; exit  }' /proc/cpuinfo|awk 'BEGIN{FS=" @"; OFS="\n"} { print $1; exit  }')"
+wm=$(xprop -id $(xprop -root _NET_SUPPORTING_WM_CHECK|cut -d\# -f2) -f _NET_WM_NAME 8t|awk -F '"' 'NF>2{print $2}')
+cpu="$(awk -F: '/model name/ {print $2;exit}' /proc/cpuinfo|sed 's/ \{1,\}/ /g')"
 ram="$(free -hm|grep Mem:|awk '{print $3" / "$2}')"
 
 #non-color effects
