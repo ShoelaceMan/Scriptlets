@@ -5,9 +5,9 @@
 secs=10
 log=/var/log/backup.log
 target=/
-bupdir=/mnt/backup
+bupdir=/mnt/backup/
 incname=$(date +%F-%T)
-incnumc=2
+incnumc=4
 bupname=$(hostname)
 bupmeth=rsync
 buptype=b
@@ -66,16 +66,12 @@ banner()
 
 increment()
 {
-  oldestb=$(find $bupdir/* -maxdepth 0 -type d -printf '%A+ %p\n'|sort|sed 1q)
-  if [[ $(find $bupdir/* -maxdepth 0 -type d|wc -l) -gt $incnumc ]];then
-    rm -rf $(echo $oldestb|awk '{print $NF}')
-  fi
-  bupname="$bupname-$(date +%F-%T)"
+  find $bupdir/ -maxdepth 1 -type d -mtime +$incnumc -exec rm -rf {} \;
 }
 
 rsyncb()
 {
-  rsync "${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir/$bupname
+  rsync "${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir$bupname
 }
 
 premain()
