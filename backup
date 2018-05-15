@@ -66,6 +66,8 @@ banner()
 
 increment()
 {
+  echo "Deleting backups older than $incnumc days:"
+  find "$bupdir/" -maxdepth 1 -type d -mtime +$incnumc
   find $bupdir/ -maxdepth 1 -type d -mtime +$incnumc -exec rm -rf {} \;
 }
 
