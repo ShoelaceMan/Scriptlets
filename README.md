@@ -27,3 +27,5 @@ Runs first argument in a new X session on a different TTY
 Runs dwm in a while loop, to restart easily
 ### pfetch ###
 A very simple info fetching script, shows digdug character as ascii
+### antergosisoupdate ###
+Simply downloads the lates antergos ISO's
