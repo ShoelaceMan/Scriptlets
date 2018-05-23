@@ -11,7 +11,7 @@ FG="#eeeeee"        # foreground colour of text/icon
 BAR_FG="#808080"    # foreground colour of volume bar
 BAR_FG_MUTE="#AA3333"    # foreground colour of volume bar
 BAR_BG="#090909"    # background colour of volume bar
-XPOS="1400"          # horizontal positioning
+XPOS="1080"          # horizontal positioning
 YPOS="438"          # vertical positioning
 HEIGHT="40"         # window height
 WIDTH="1920"         # window width
@@ -66,7 +66,7 @@ esac
 
 #Actual volume changing (readability low)
 AMIXOUT="$(amixer set "$IF" "$AMIXARG" | tail -n 1)"
-MUTE="$(cut -d '[' -f 3 <<<"$AMIXOUT")"
+MUTE="$(cut -d '[' -f 4 <<<"$AMIXOUT")"
 VOL="$(cut -d '[' -f 2 <<<"$AMIXOUT" | sed 's/%.*//g')"
 if [ "$MUTE" = "off]" ]; then
   ICON=$ICON_VOL_MUTE
@@ -84,7 +84,7 @@ fi
 
 #Feed the pipe!
 if [ "$MUTE" = "off]" ]; then
-  (echo "$VOL" | dzen2-gdbar -fg "$BAR_FG_MUTE" -bg "$BAR_BG" -w "$BAR_WIDTH" ; sleep "$SECS") > "$PIPE"
+  (echo "$VOL" | gdbar -fg "$BAR_FG_MUTE" -bg "$BAR_BG" -w "$BAR_WIDTH" ; sleep "$SECS") > "$PIPE"
 else
-  (echo "$VOL" | dzen2-gdbar -fg "$BAR_FG" -bg "$BAR_BG" -w "$BAR_WIDTH" ; sleep "$SECS") > "$PIPE"
+  (echo "$VOL" | gdbar -fg "$BAR_FG" -bg "$BAR_BG" -w "$BAR_WIDTH" ; sleep "$SECS") > "$PIPE"
 fi

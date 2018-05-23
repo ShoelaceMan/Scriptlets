@@ -6,7 +6,8 @@ if [ -z $1  ]; then
 fi
 
 if [ -z "$(pidof $1)" ]; then
-  (screen -S $1 $1)
+  (screen -d -m -S $1 $1)
+  echo "$1 started in background"
 else
 	(screen -Dr $1)
 fi
