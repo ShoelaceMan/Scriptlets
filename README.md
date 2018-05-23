@@ -29,3 +29,7 @@ Runs dwm in a while loop, to restart easily
 A very simple info fetching script, shows digdug character as ascii
 ### antergosisoupdate ###
 Simply downloads the lates antergos ISO's
+### click ###
+An autoclicker written in python
+### intsize ###
+Automatically detects and sets font size
