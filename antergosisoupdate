@@ -1,0 +1,14 @@
+#! /bin/bash
+#
+#Variable definition
+sourcedir='https://mirror.umd.edu/antergos/iso/release/' #Where to download from
+targetdir="$HOME/Documents/Archive/ISO/Antergos"         #Where to save to
+download=$(curl $sourcedir|awk -F'">|</a' '{print $2}'|grep iso$)
+
+#Empty directory if it has more than 2 files
+[ $(find $targetdir -type f|wc -l) -gt 2 ] && rm -rf $targetdir/*.iso
+
+#Download new files without overwriting
+for file in $download; do
+  wget -nc -P $targetdir $sourcedir$file
+done
