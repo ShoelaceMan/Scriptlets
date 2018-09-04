@@ -7,10 +7,12 @@ log=/var/log/backup.log
 target=/
 bupdir=/mnt/backup/
 incname=$(date +%F-%T)
-incnumc=6
+incnumc=3
 bupname=$(hostname)
 bupmeth=rsync
 buptype=b
+after=""
+afterarg=()
 
 rsyncoptions=(
 -Pauvr
@@ -45,11 +47,20 @@ usage()
   -m,--method <method>        Specify which method to use
   -a,--type <type> <args>     Specify how to manage snapshots
   -x,--skip                   Skip next backup
+  -A,--after                  Run this on backup after the backup is complete.
   -h,--help <path>            Display this help dialogue"""
+}
+
+after()
+{
+  echo "Running $after $bupdir$bupname..."
 }
 
 cleanup()
 {
+  if [[ ! -z $after ]]; then
+    "$after" "$bupdir$bupname"
+  fi
   rm -rf /tmp/nobackup
   touch $bupdir/$bupname
   printf "\n\n$bupname logging stopped at $(date)\n\n" >> $log
@@ -68,7 +79,7 @@ increment()
 {
   echo "Deleting backups older than $incnumc days:"
   find "$bupdir/" -maxdepth 1 -type d -mtime +$incnumc
-  find $bupdir/ -maxdepth 1 -type d -mtime +$incnumc -exec rm -rf {} \;
+  find "$bupdir/" -maxdepth 1 -type d -mtime +$incnumc -exec rm -rf {} \;
 }
 
 rsyncb()
@@ -156,6 +167,10 @@ premain()
           i)
             increment
         esac
+        ;;
+      -A | --after )
+        shift
+        after="$1"
         ;;
       -h | --help )
         usage
