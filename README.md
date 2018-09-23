@@ -33,3 +33,5 @@ Simply downloads the lates antergos ISO's
 An autoclicker written in python
 ### intsize ###
 Automatically detects and sets font size
+### rar2zip ###
+Converts rar archives in a directory to zip
