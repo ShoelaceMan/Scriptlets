@@ -15,23 +15,18 @@ kernel="$(uname -sr)"
 uptime="$(uptime -p|sed 's/up //')"
 packages="$(($(pacman -Qq|wc -l)+$(rpm -qa|wc -l)+$(dpkg -l|wc -l)))"
 shell="$(basename ${SHELL})"
-wm=$(xprop -id $(xprop -root _NET_SUPPORTING_WM_CHECK|cut -d\# -f2) -f _NET_WM_NAME 8t|awk -F '"' 'NF>2{print $2}')
-cpu="$(awk -F: '/name/ {print $2;exit}' /proc/cpuinfo|sed 's/ \{1,\}/ /g') ($(nproc))"
+wm=$(xprop -id $(xprop -root _NET_SUPPORTING_WM_CHECK|cut -d\# -f2) -f _NET_WM_NAME 8t|awk -F\" 'NF>2{print $2}')
+cpu="$(awk -F: '/name/ {print $2;exit}' /proc/cpuinfo) ($(nproc))"
 ram="$(free -hm|grep Mem:|awk '{print $3" / "$2}')"
 
-if [ -z "${WM}" ]; then
+if [ -z "${wm}" ]; then
   if [ "${XDG_CURRENT_DESKTOP}" ]; then
-    envtype='DE'
     wm="${XDG_CURRENT_DESKTOP}"
   elif [ "${DESKTOP_SESSION}" ]; then
-    envtype='DE'
     wm="${DESKTOP_SESSION}"
   else
-    envtype='WM'
     wm="$(tail -n 1 "${HOME}/.xinitrc" | cut -d ' ' -f 2)"
   fi
-else
-  envtype='WM'
 fi
 
 #non-color effects
@@ -59,21 +54,21 @@ bc6="$(tput setab 6)"	# cyan
 bc7="$(tput setab 7)"	# white
 
 # Text and logo colors
-lc="${bc}${c5}"      	# labels
-nc="${ul}${bc}${c5}"	# user and hostname
-ic="${rc}${bc}${c7}"	# info
+lc="${c5}"      # labels
+nc="${ul}${c5}"	# user and hostname
+ic="${rc}"	    # info
 
 #Draw ascii art and print fetch
 cat << EOF
- ${bc}${c7}       ${rc}         ${nc}${USER}${ic}@${nc}${host}${rc}
- ${bc}${c7}    ▄▄▄${rc}         ${lc}OS:       ${ic}${os}${rc}
- ${bc}${c7} ▄█████▄▄ ${rc}      ${lc}KERNEL:   ${ic}${kernel}${rc}
- ${bc}${c7}███${bc6}▀▀▀▀${bc0}▀${bc6}▀${bc0}▀${bc6}▀${rc}     ${lc}UPTIME:   ${ic}${uptime}${rc}
- ${bc}${c7}███${bc6}▄   ${c0}▀ ▀${rc}${c6}▀${rc}     ${lc}PACKAGES: ${ic}${packages}${rc}
- ${bc}${c7} ▄${bc6}  ${rc}${bc}${c7}█████▄ ${rc}${c1}█▄${rc}   ${lc}SHELL:    ${ic}${shell}${rc}
- ${rc}${c1}▀▀${rc}${bc}${bc1}${c7}▄${bc6}▄   ${bc1}▄▄▄${rc}${c1}▀██▀${rc}  ${lc}WM:       ${ic}${wm}${rc}
- ${bc}${c7} ██▀▀▀██▀  ${rc}${c1}▀${rc}    ${lc}CPU:     ${ic}${cpu}${rc}
- ${bc}${c7} ▀▀▀▀ ▀▀▀▀${rc}      ${lc}RAM:      ${ic}${ram}${rc}
+ $bc$c7       $rc         $nc$USER$ic@$nc$host$rc
+ $bc$c7    ▄▄▄$rc         ${lc}OS:       $ic$os$rc
+ $bc$c7 ▄█████▄▄ $rc      ${lc}KERNEL:   $ic$kernel
+ $bc$c7███$bc6▀▀▀▀$bc0▀$bc6▀$bc0▀$bc6▀$rc     ${lc}UPTIME:   $ic$uptime
+ $bc$c7███$bc6▄   $c0▀ ▀$rc$c6▀$rc     ${lc}PACKAGES: $ic$packages
+ $bc$c7 ▄$bc6  $rc$bc$c7█████▄ $rc$c1█▄$rc   ${lc}SHELL:    $ic$shell
+ $rc$c1▀▀$rc$bc$bc1$c7▄$bc6▄   $bc1▄▄▄$rc$c1▀██▀$rc  ${lc}WM:       $ic$wm
+ $bc$c7 ██▀▀▀██▀  $rc$c1▀$rc    ${lc}CPU:     $ic$cpu$rc
+ $bc$c7 ▀▀▀▀ ▀▀▀▀$rc      ${lc}RAM:      $ic$ram$rc
 EOF
 
 # Show terminal colors
