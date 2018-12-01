@@ -1,13 +1,19 @@
-#!/bin/bash
+#!/bin/sh
+basename=buster
+sandbox="$1"
+arch=amd64
+container="${basename}-${sandbox}-${arch}"
 
-if [ ! -d /tmp/sandbox  ]; then
-  sudo su -c "mkdir /tmp/sandbox" sandbox
-fi
+commandline="$*"
 
-if [ $# -ge 1 ]; then
-  sand=$@
-  echo "starting ${game}"
-  sudo su -c $sand sandbox
+if  ! lxc-ls --running|grep $container; then
+	echo 'Container not running, starting...'
+	lxc-start -n $container -d
 else
-  sudo su sandbox
+	lxc-attach --clear-env -n $container --clear-env -- killall $commandline
 fi
+
+echo "Using display $DISPLAY"
+lxc-attach --clear-env -n $container -- sudo -u $USER -i\
+	env DISPLAY=$DISPLAY $commandline
+lxc-stop $container

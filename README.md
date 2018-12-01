@@ -14,7 +14,7 @@ Moves the mouse to the center of focused window, good for tiling wm's.
 ### lsiommu ###
 Lists PCI devices, and shows their IOMMU groupings.
 ### sandbox ###
-Runs commands as user with no permissions, and a home in /tmp/
+Runs commands in an lxc container. Container needs to exist.
 ### screendr ###
 Uses menu to show an interactive list of screen sessions.
 ### screenify ###
