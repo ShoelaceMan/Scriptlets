@@ -9,7 +9,7 @@ delta = 0
 
 n = 3
 while n > 0:
- print n
+ print(n)
  time.sleep(1)
  n = n - 1
 
@@ -17,7 +17,7 @@ d = display.Display()
 loc1 = d.screen().root.query_pointer()._data
 delta = 0
 
-while delta < 800:
+while delta < 80:
  fake_input(d, X.ButtonPress, 1)
  fake_input(d, X.ButtonRelease, 1)
  d.sync()
