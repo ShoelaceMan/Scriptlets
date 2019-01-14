@@ -35,3 +35,5 @@ An autoclicker written in python
 Automatically detects and sets font size
 ### rar2zip ###
 Converts rar archives in a directory to zip
+### allseeingeye ###
+Concurrently downloads files from an index page recursively. Not for the faint of heart.
