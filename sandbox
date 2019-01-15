@@ -1,5 +1,5 @@
 #!/bin/sh
-basename=buster
+basename="$2"
 sandbox="$1"
 arch=amd64
 container="${basename}-${sandbox}-${arch}"
