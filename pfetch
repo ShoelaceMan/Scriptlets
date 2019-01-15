@@ -13,11 +13,15 @@ host="$(hostname)"
 os=$(grep "PRETTY_NAME" /etc/os-release|awk -F '"' 'NF>2{print $2}')
 kernel="$(uname -sr)"
 uptime="$(uptime -p|sed 's/up //')"
-packages="$(($(pacman -Qq|wc -l)+$(rpm -qa|wc -l)+$(dpkg -l|wc -l)))"
 shell="$(basename ${SHELL})"
 wm=$(xprop -id $(xprop -root _NET_SUPPORTING_WM_CHECK|cut -d\# -f2) -f _NET_WM_NAME 8t|awk -F\" 'NF>2{print $2}')
 cpu="$(awk -F: '/name/ {print $2;exit}' /proc/cpuinfo) ($(nproc))"
 ram="$(free -hm|grep Mem:|awk '{print $3" / "$2}')"
+packages=$(($(pacman -Qq|wc -l)+\
+  $(rpm -qa|wc -l)+\
+  $(dpkg -l|wc -l)+\
+  $(find /var/db/pkg/ -type d|wc -l)+\
+  $(apk info|wc -l)))
 
 if [ -z "${wm}" ]; then
   if [ "${XDG_CURRENT_DESKTOP}" ]; then
