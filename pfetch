@@ -21,8 +21,8 @@ packages=$(($(pacman -Qq|wc -l)+\
   $(rpm -qa|wc -l)+\
   $(dpkg -l|wc -l)+\
   $(find /var/db/pkg/ -type d|wc -l)+\
-  $(apk info|wc -l))+\
-  $(pkg_info|wc -l))
+  $(apk info|wc -l)+\
+  $(pkg_info|wc -l)))
 
 if [ -z "${wm}" ]; then
   if [ "${XDG_CURRENT_DESKTOP}" ]; then
