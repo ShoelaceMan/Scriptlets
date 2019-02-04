@@ -1,19 +1,18 @@
-#!/bin/sh
-basename="$2"
+#!/bin/bash
+basename="$1"
+shift
 sandbox="$1"
-arch=amd64
-container="${basename}-${sandbox}-${arch}"
+shift
+container="${basename}-${sandbox}"
+commandline="$@"
+fullcommand=(
+  sudo -u $sandbox \
+    -i DISPLAY=$DISPLAY \
+    $commandline
+      )
 
-commandline="$*"
-
-if  ! lxc-ls --running|grep $container; then
-	echo 'Container not running, starting...'
-	lxc-start -n $container -d
-else
-	lxc-attach --clear-env -n $container --clear-env -- killall $commandline
-fi
-
-echo "Using display $DISPLAY"
-lxc-attach --clear-env -n $container -- sudo -u $USER -i\
-	env DISPLAY=$DISPLAY $commandline
-lxc-stop $container
+echo "Container:\t $container"
+echo "Display:\t $DISPLAY"
+echo "Running:\t ${fullcommand[@]}"
+sudo lxc-start -Fn $container -- "${fullcommand[@]}"
+sudo lxc-stop "$container"
