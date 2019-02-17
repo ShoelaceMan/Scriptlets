@@ -6,7 +6,7 @@ shift
 container="${basename}-${sandbox}"
 commandline="$@"
 fullcommand=(
-  sudo -HnPSu $sandbox \
+  sudo -HnSu $sandbox \
     -i DISPLAY=$DISPLAY \
     -- $commandline
       )
