@@ -210,8 +210,10 @@ main()
     exit 1
   fi
   # Display warning and cancel button
-  xmessage -timeout $(($secs * 60)) -nearmous -buttons \
-    "run,cancel" "Performing backup in $secs minutes."
+  if which backup > /dev/null 2>&1; then
+    xmessage -timeout $(($secs * 60)) -nearmous -buttons \
+      "run,cancel" "Performing backup in $secs minutes."
+  fi
   if [ $? -eq 102  ]; then
     echo "User cancelled backup"
   else
