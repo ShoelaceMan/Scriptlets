@@ -4,8 +4,16 @@
 import argparse
 import datetime
 import distutils.spawn
+import os
 import socket
 import subprocess
+
+if os.geteuid() != 0:
+  print('This program requires root access, trying sudo')
+  sudoreturnval = subprocess.call("sudo -v", shell=True)
+  if sudoreturnval != 0:
+    print('Failed to gain root access')
+    quit(1)
 
 launchtime = datetime.datetime.now()
 rsyncexcludearg = '--exclude='
@@ -18,8 +26,6 @@ exclude = ["/dev/*",
     "/mnt/*",
     "/media/*",
     "/lost+found"]
-
-#"${rsyncoptions[@]}" "${exclude[@]}" $target $bupdir$bupname
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--sleep', type=str, dest='warningseconds',
