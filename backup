@@ -1,4 +1,4 @@
-#!/usr/sbin/python
+#!/usr/bin/python3
 # Script to backup selected folders, made for cron
 # By Trent Arcuri, 2019
 import argparse
@@ -53,13 +53,18 @@ def banner():
 def cleanup():
     humanendtime = time.strftime("%Y-%m-%d %H:%M:%S")
     print('Backup completed, cleaning up')
+    if args.increment:
+        incrementprebackup()
     os.utime(args.backupdir + args.backupname, (launchtime, launchtime))
     print(args.backupname, "backup stopped at", humanendtime)
 
 def incrementprebackup():
     print('Deleting backups older than', args.backupincmax, 'days:')
-    print('...is what I WOULD be doing, if this were implemented yet! :P')
-    quit(1)
+    for backup in os.listdir(args.backupdir + args.backuptarget):
+      backup = args.backupdir + args.backuptarget + '/' + backup
+      if os.stat(backup).st_mtime < launchtime - args.backupincmax * 86400:
+        os.remove(backup)
+        print('Deleted', backup)
 
 def rsyncbackup():
     rsyncexclude = [ rsyncexcludearg + excludeitem for excludeitem in exclude ]
@@ -76,14 +81,14 @@ def main():
         warning = subprocess.call(["xmessage", "-timeout", args.warningseconds,
             "-nearmous", "-buttons", "run,cancel",
             "Performing backup in", args.warningseconds, "seconds."])
+    else:
+      warning = 101
     if warning == 102:
         print('User cancelled backup.')
         cleanup()
         quit(1)
     ## Display warning and cancel button ##
     print('Running backup')
-    if args.increment:
-        incrementprebackup
     rsyncbackup()
     cleanup()
 main()
