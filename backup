@@ -2,20 +2,19 @@
 # Script to backup selected folders, made for cron
 # By Trent Arcuri, 2019
 import argparse
-import datetime
+#import datetime
+import time
 import distutils.spawn
 import os
 import socket
 import subprocess
+import sys
 
 if os.geteuid() != 0:
   print('This program requires root access, trying sudo')
-  sudoreturnval = subprocess.call("sudo -v", shell=True)
-  if sudoreturnval != 0:
-    print('Failed to gain root access')
-    quit(1)
+  os.execvp("sudo", ["sudo"] + sys.argv)
 
-launchtime = datetime.datetime.now()
+launchtime = time.time()
 rsyncexcludearg = '--exclude='
 rsyncoptions = ['-Pauvr', '--delete']
 exclude = ["/dev/*",
@@ -43,7 +42,7 @@ parser.add_argument('-m', '--maxincrement', type = int, dest = 'backupincmax',
 args = parser.parse_args()
 
 def banner():
-    print("Backup running at", launchtime.strftime("%Y-%m-%d %H:%M:%S"), "\n",
+    print("Backup running at", launchtime, "\n",
         "Backup target:", args.backuptarget, "\n",
         "Output directory:",args.backupdir, "\n",
         "Backup name:",args.backupname, "\n",
@@ -53,8 +52,8 @@ def banner():
 
 def cleanup():
     print('Backup completed, cleaning up')
-    subprocess.call(['touch', args.backupdir + args.backupname])
-    print(args.backupname, "backup stopped at",datetime.datetime.now())
+    os.utime(args.backupdir + args.backupname, (launchtime, launchtime))
+    print(args.backupname, "backup stopped at", 'afsdfa')
 
 def incrementprebackup():
     print('Deleting backups older than', args.backupincmax, 'days:')
