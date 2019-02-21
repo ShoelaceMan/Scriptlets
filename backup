@@ -2,7 +2,6 @@
 # Script to backup selected folders, made for cron
 # By Trent Arcuri, 2019
 import argparse
-#import datetime
 import time
 import distutils.spawn
 import os
@@ -15,6 +14,7 @@ if os.geteuid() != 0:
   os.execvp("sudo", ["sudo"] + sys.argv)
 
 launchtime = time.time()
+humanlaunchtime = time.strftime("%Y-%m-%d %H:%M:%S")
 rsyncexcludearg = '--exclude='
 rsyncoptions = ['-Pauvr', '--delete']
 exclude = ["/dev/*",
@@ -42,7 +42,7 @@ parser.add_argument('-m', '--maxincrement', type = int, dest = 'backupincmax',
 args = parser.parse_args()
 
 def banner():
-    print("Backup running at", launchtime, "\n",
+    print("Backup running at", humanlaunchtime, "\n",
         "Backup target:", args.backuptarget, "\n",
         "Output directory:",args.backupdir, "\n",
         "Backup name:",args.backupname, "\n",
@@ -51,9 +51,10 @@ def banner():
         "Increment mode:", args.increment)
 
 def cleanup():
+    humanendtime = time.strftime("%Y-%m-%d %H:%M:%S")
     print('Backup completed, cleaning up')
     os.utime(args.backupdir + args.backupname, (launchtime, launchtime))
-    print(args.backupname, "backup stopped at", 'afsdfa')
+    print(args.backupname, "backup stopped at", humanendtime)
 
 def incrementprebackup():
     print('Deleting backups older than', args.backupincmax, 'days:')
