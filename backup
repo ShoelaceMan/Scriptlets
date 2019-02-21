@@ -9,48 +9,69 @@ import socket
 import subprocess
 import sys
 
+# Test if running as root, if not, attemp a respawn using sudo
 if os.geteuid() != 0:
-  print('This program requires root access, trying sudo')
-  os.execvp("sudo", ["sudo"] + sys.argv)
+    print('This program requires root access, trying sudo')
+    os.execvp("sudo", ["sudo"] + sys.argv)
 
+# Gather command line arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('-s', '--sleep',
+                    type=str, dest='warningseconds', default='10',
+                    help='Specify seconds to show warning before continuing')
+parser.add_argument('-n', '--name',
+                    type=str, dest='backupname', default=socket.gethostname(),
+                    help='Specify name for this backup')
+parser.add_argument('-t', '--target',
+                    type=str, dest='backuptarget', default='/',
+                    help='Specify what to backup')
+parser.add_argument('-d', '--directory',
+                    type=str, dest='backupdir', default='/mnt/backup/',
+                    help='Specify where to backup to')
+parser.add_argument('-i', '--increment',
+                    dest='increment', action='store_true', default=False,
+                    help='Run an incremental backup')
+parser.add_argument('-m', '--maxincrement',
+                    type=int, dest='backupincmax', default=3,
+                    help='Run an incremental backup')
+args = parser.parse_args()
+# Format/shorten arguments into sane variables
+# Rsync copies here in the end
+finalpath = args.backupdir + args.backupname + '/'
+# When the script was called
 launchtime = time.time()
 humanlaunchtime = time.strftime("%Y-%m-%d %H:%M:%S")
+# Rsync command sanitization
+rsync = distutils.spawn.find_executable('rsync')
 rsyncexcludearg = '--exclude='
 rsyncoptions = ['-Pauvr', '--delete']
 exclude = ["/dev/*",
-    "/proc/*",
-    "/sys/*",
-    "/tmp/*",
-    "/run/*",
-    "/mnt/*",
-    "/media/*",
-    "/lost+found"]
+           "/proc/*",
+           "/sys/*",
+           "/tmp/*",
+           "/run/*",
+           "/mnt/*",
+           "/media/*",
+           "/lost+found"]
+# Add rsyncexcludearg before every exclude listed above
+rsyncexclude = [rsyncexcludearg + excludeitem for excludeitem in exclude]
+rsyncargs = rsyncoptions + rsyncexclude
+rsynccommand = [rsync] + rsyncargs + [args.backuptarget, finalpath]
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-s', '--sleep', type=str, dest='warningseconds',
-    default = '10', help='Specify seconds to show warning before continuing')
-parser.add_argument('-n', '--name', type=str, dest='backupname',
-    default = socket.gethostname(), help='Specify name for this backup')
-parser.add_argument('-t', '--target', type=str, dest='backuptarget',
-    default = '/', help='Specify what to backup')
-parser.add_argument('-d', '--directory', type=str, dest='backupdir',
-    default = '/mnt/backup/', help='Specify where to backup to')
-parser.add_argument('-i', '--increment', dest = 'increment',
-    action = 'store_true', default = False, help='Run an incremental backup')
-parser.add_argument('-m', '--maxincrement', type = int, dest = 'backupincmax',
-    default = 3, help='Run an incremental backup')
-args = parser.parse_args()
 
 def banner():
+    # Print some info about what is going to run
     print("Backup running at", humanlaunchtime, "\n",
-        "Backup target:", args.backuptarget, "\n",
-        "Output directory:",args.backupdir, "\n",
-        "Backup name:",args.backupname, "\n",
-        "Maximum increments:",args.backupincmax, "\n",
-        "Warning timeout:",args.warningseconds, "\n",
-        "Increment mode:", args.increment)
+          "Backup target:", args.backuptarget, "\n",
+          "Output directory:", args.backupdir, "\n",
+          "Backup name:", args.backupname, "\n",
+          "Maximum increments:", args.backupincmax, "\n",
+          "Warning timeout:", args.warningseconds, "\n",
+          "Increment mode:", args.increment)
+
 
 def cleanup():
+    # Gather time as of completion, print, and increment if necessary
     humanendtime = time.strftime("%Y-%m-%d %H:%M:%S")
     print('Backup completed, cleaning up')
     if args.increment:
@@ -58,37 +79,47 @@ def cleanup():
     os.utime(args.backupdir + args.backupname, (launchtime, launchtime))
     print(args.backupname, "backup stopped at", humanendtime)
 
+
 def incrementprebackup():
+    # Test if any backups are older than X days, if so, delete //DESTRUCTIVE//
     print('Deleting backups older than', args.backupincmax, 'days:')
     for backup in os.listdir(args.backupdir + args.backuptarget):
-      backup = args.backupdir + args.backuptarget + '/' + backup
-      if os.stat(backup).st_mtime < launchtime - args.backupincmax * 86400:
-        os.remove(backup)
+        backup = args.backupdir + args.backuptarget + '/' + backup
+        if os.stat(backup).st_mtime < launchtime - args.backupincmax * 86400:
+            os.remove(backup)
         print('Deleted', backup)
 
+
 def rsyncbackup():
-    rsyncexclude = [ rsyncexcludearg + excludeitem for excludeitem in exclude ]
-    rsynccommand = ['rsync'] + rsyncoptions + rsyncexclude + [args.backuptarget,
-        args.backupdir+args.backupname]
+    # Run the backup process here, print command for log usage/debugging
     print("Running", rsynccommand)
     subprocess.call(rsynccommand)
 
+
 def main():
-    banner()    # Print banner, valuable information
-    ## Display warning and cancel button ##
-    if distutils.spawn.find_executable("xmessage") != None:
+    # Main program entry point, call preliminary functions
+    banner()
+    # Test if xmessage is installed, if so, show a warning message
+    if distutils.spawn.find_executable("xmessage") is not None:
         print('Xmessage found, launching warning message')
         warning = subprocess.call(["xmessage", "-timeout", args.warningseconds,
-            "-nearmous", "-buttons", "run,cancel",
-            "Performing backup in", args.warningseconds, "seconds."])
+                                   "-nearmous",
+                                   "-buttons", "run,cancel",
+                                   "Performing backup in", args.warningseconds,
+                                   "seconds."])
     else:
-      warning = 101
+        # This is necessary in case the program is run headlessly (e.g. ssh)
+        warning = 101
     if warning == 102:
         print('User cancelled backup.')
+        # Note this behaviour, an incremental cleanup is still performed
         cleanup()
         quit(1)
-    ## Display warning and cancel button ##
     print('Running backup')
+    # Begin backup, after tests
     rsyncbackup()
     cleanup()
+
+
+# Call main function
 main()
