@@ -32,8 +32,6 @@ parser.add_argument('-s', '--sleep', type=str, dest='warningseconds',
     default = '10', help='Specify seconds to show warning before continuing')
 parser.add_argument('-n', '--name', type=str, dest='backupname',
     default = socket.gethostname(), help='Specify name for this backup')
-parser.add_argument('-l', '--log', type=str, dest='backuplog',
-    default = '/var/log/backup.log', help='Specify path to log file')
 parser.add_argument('-t', '--target', type=str, dest='backuptarget',
     default = '/', help='Specify what to backup')
 parser.add_argument('-d', '--directory', type=str, dest='backupdir',
@@ -49,22 +47,24 @@ def banner():
         "Backup target:", args.backuptarget, "\n",
         "Output directory:",args.backupdir, "\n",
         "Backup name:",args.backupname, "\n",
-        "Log file:",args.backuplog, "\n",
         "Maximum increments:",args.backupincmax, "\n",
         "Warning timeout:",args.warningseconds, "\n",
         "Increment mode:", args.increment)
 
 def cleanup():
     print('Backup completed, cleaning up')
-    subprocess.call(['touch', args.backupdir+args.backupname])
-    print(args.backupname, "logging stopped at",datetime.datetime.now())
+    subprocess.call(['touch', args.backupdir + args.backupname])
+    print(args.backupname, "backup stopped at",datetime.datetime.now())
 
 def incrementprebackup():
     print('Deleting backups older than', args.backupincmax, 'days:')
+    print('...is what I WOULD be doing, if this were implemented yet! :P')
+    quit(1)
 
 def rsyncbackup():
-    rsyncexclude = [ rsyncexcludearg+excludeitem for excludeitem in exclude ]
-    rsynccommand = ['rsync'] + rsyncoptions + rsyncexclude + [args.backuptarget, args.backupdir+args.backupname]
+    rsyncexclude = [ rsyncexcludearg + excludeitem for excludeitem in exclude ]
+    rsynccommand = ['rsync'] + rsyncoptions + rsyncexclude + [args.backuptarget,
+        args.backupdir+args.backupname]
     print("Running", rsynccommand)
     subprocess.call(rsynccommand)
 
