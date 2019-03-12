@@ -2,11 +2,13 @@
 
 IFS=$'\n'
 
-for REPO in $(find $HOME -type d -name .git)
-do
-  cd $REPO/../ &&
-  printf "$(pwd) $(git pull)\n" &
+for REPO in $(find $HOME -type d -name .git); do
+  (
+    cd $REPO/../ &&
+    git pull | sed "s#^#$PWD: #"
+    if [[ $(git submodule|wc -l) -ne 0  ]]; then
+      git submodule update
+    fi
+  ) &
 done
-
 wait
-echo
