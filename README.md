@@ -37,3 +37,5 @@ Automatically detects and sets font size
 Converts rar archives in a directory to zip
 ### allseeingeye ###
 Concurrently downloads files from an index page recursively. Not for the faint of heart.
+### customize-makepkg ###
+Add the ability to use customizepkg on every AUR helper
