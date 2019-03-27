@@ -5,7 +5,7 @@ IFS=$'\n'
 for REPO in $(find $HOME -type d -name .git); do
   (
     cd $REPO/../ &&
-    git pull --recurse-submodules 2>&1 | sed "s#^#$PWD: #"
+    git pull --recurse-submodules -j 0 2>&1 | sed "s#^#$PWD: #"
   ) &
 done
 wait
