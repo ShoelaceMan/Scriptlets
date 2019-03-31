@@ -12,16 +12,27 @@ fullcommand=(
       )
 set -m
 
-printf "Container:\t $container\n"
-printf "Display:\t $DISPLAY\n"
-printf "Running:\t ${fullcommand[@]}\n"
+info(){
+  printf "Container:\t $container\n"
+  printf "Display:\t $DISPLAY\n"
+  printf "Running:\t ${fullcommand[@]}"
+}
 
-sudo lxc-start -n $container
-if sudo lxc-wait --name=$container --state=RUNNING; then
-  sudo lxc-attach -n $container -- "${fullcommand[@]}"
-  sudo lxc-stop "$container"
-else
-  printf "Failed to start $container\n"
-  sudo lxc-stop "$container"
-  exit 1
-fi
+main(){
+  info
+  printf "\nStarting container $container\n"
+  sudo lxc-start -n $container
+  if sudo lxc-wait --name=$container --state=RUNNING; then
+    printf "$container entered state 'RUNNING' running $commandline\n"
+    sudo lxc-attach -n $container -- "${fullcommand[@]}"
+    sudo lxc-stop "$container"
+    printf "$commandline exited\n"
+  else
+    printf "Failed to start $container\n"
+    sudo lxc-stop "$container"
+    exit 1
+  fi
+  sudo lxc-wait --name=$container --state=STOPPED
+}
+
+main
