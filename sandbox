@@ -12,9 +12,16 @@ fullcommand=(
       )
 set -m
 
-echo "Container:\t $container"
-echo "Display:\t $DISPLAY"
-echo "Running:\t ${fullcommand[@]}"
+printf "Container:\t $container\n"
+printf "Display:\t $DISPLAY\n"
+printf "Running:\t ${fullcommand[@]}\n"
+
 sudo lxc-start -n $container
-sudo lxc-attach -n $container -- "${fullcommand[@]}"
-sudo lxc-stop "$container"
+if sudo lxc-wait --name=$container --state=RUNNING; then
+  sudo lxc-attach -n $container -- "${fullcommand[@]}"
+  sudo lxc-stop "$container"
+else
+  printf "Failed to start $container\n"
+  sudo lxc-stop "$container"
+  exit 1
+fi
