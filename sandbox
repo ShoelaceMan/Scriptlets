@@ -25,8 +25,9 @@ main(){
   if sudo lxc-wait --name=$container --state=RUNNING; then
     printf "$container entered state 'RUNNING' running $commandline\n"
     sudo lxc-attach -n $container -- "${fullcommand[@]}"
+    containerrc=$?
     sudo lxc-stop "$container"
-    printf "$commandline exited\n"
+    printf "$commandline exited with return code $containerrc\n"
   else
     printf "Failed to start $container\n"
     sudo lxc-stop "$container"
