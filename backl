@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+#
+offset=10
+devicepath='/sys/class/backlight/acpi_video0/brightness'
+current=$(cat "$devicepath")
+
+#Argument Parsing
+case "$1" in
+  '-i'|'--increase')
+    function="+ $offset"
+    ;;
+  '-d'|'--decrease')
+    function="- $offset"
+    ;;
+esac
+
+# Run the actual command
+echo $(($current $function)) > "$devicepath"
