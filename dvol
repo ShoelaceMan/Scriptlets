@@ -4,7 +4,8 @@
 #
 
 #Customize this stuff
-IF="$(amixer scontrols|awk -F\' 'NR==1{print $2}')" # audio channel: Master|PCM
+IF="$3" # audio channel: Master|PCM
+CARD="$4"
 SECS="1"            # sleep $SECS
 BG="#151515"        # background colour of window
 FG="#eeeeee"        # foreground colour of text/icon
@@ -31,7 +32,7 @@ err() {
 }
 
 usage() {
-  echo "usage: dvol [option] [argument]"
+  echo "usage: dvol [option] [argument] [interface] [card]"
   echo
   echo "Options:"
   echo "     -i, --increase - increase volume by \`argument'"
@@ -65,7 +66,8 @@ case "$1" in
 esac
 
 #Actual volume changing (readability low)
-AMIXOUT="$(amixer set "$IF" "$AMIXARG" | tail -n 1)"
+AMIXOUT="$(amixer -c "$CARD" set "$IF" "$AMIXARG" | tail -n 1)"
+echo amixer -c "$CARD" set "$IF" "$AMIXARG"
 MUTE="$(cut -d '[' -f 4 <<<"$AMIXOUT")"
 VOL="$(cut -d '[' -f 2 <<<"$AMIXOUT" | sed 's/%.*//g')"
 if [ "$MUTE" = "off]" ]; then
