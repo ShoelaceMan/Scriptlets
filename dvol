@@ -67,7 +67,6 @@ esac
 
 #Actual volume changing (readability low)
 AMIXOUT="$(amixer -c "$CARD" set "$IF" "$AMIXARG" | tail -n 1)"
-echo amixer -c "$CARD" set "$IF" "$AMIXARG"
 MUTE="$(cut -d '[' -f 4 <<<"$AMIXOUT")"
 VOL="$(cut -d '[' -f 2 <<<"$AMIXOUT" | sed 's/%.*//g')"
 if [ "$MUTE" = "off]" ]; then
