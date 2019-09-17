@@ -1,4 +1,12 @@
 #! /bin/bash
+
+## Only run this one time
+if ! grep coreos.first_boot=detected /proc/cmdline; then
+  scriptlocation="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+  rm -rf $scriptlocation
+  exit 0
+fi
+
 ## Install CNI plugins (required for most pod network):
 CNI_VERSION="v0.7.5"
 mkdir -p /opt/cni/bin
