@@ -25,11 +25,9 @@ containerrun(){
     printf "'$container' entered state 'RUNNING', running '$commandline'\n"
     sudo lxc-attach -n $container -- "${fullcommand[@]}"
     containerrc=$?
-    sudo lxc-stop "$container"
     printf "'$commandline' exited with return code '$containerrc'\n"
   else
     printf "Failed to start '$container'\n"
-    sudo lxc-stop "$container"
     exit 1
   fi
   sudo lxc-wait --name=$container --state=STOPPED
