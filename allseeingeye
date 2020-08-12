@@ -3,8 +3,8 @@
 url="$1"
 list=$(mktemp)
 
-curl $url|\
+curl "${url}"|\
 	awk -F'[\"|<|>]' '/<\/a>/{print $3}'|grep -v ^$|\
-	sed -s "s|^|$url|" > $list
-aria2c --check-certificate=false -R -c -j 1 -m 0 -i $list
-rm -rfv $list
+	sed -s "s|^|$url|" > "${list}"
+  aria2c --check-certificate=false -R -c -j "$(nproc)" -m 0 -i "${list}"
+rm -rfv "${list}"
