@@ -1,0 +1,19 @@
+#! /bin/sh
+
+#Session name
+readonly session="scratchpad"
+
+#If screen session does not exist, create and populate it
+if ! screen -ls "${session}" > /dev/null; then
+  #Create a scratchpad session
+  screen -dmS "${session}"
+  #Create screen windows
+  for pane in $(seq 4); do
+    screen -S "${session}" -X screen "${pane}"
+  done
+  #Type SSH command to host in the first window
+  screen -S "${session}" -p 0 -X stuff "ssh root@int.babbage\n"
+fi
+
+#Attach to the screen session
+screen -Drr "${session}"
