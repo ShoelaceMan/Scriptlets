@@ -4,7 +4,8 @@
 readonly session="scratchpad"
 
 #If screen session does not exist, create and populate it
-if ! screen -ls "${session}" > /dev/null; then
+if ! screen -ls "${session}"; then
+  echo "Creating screen session"
   #Create a scratchpad session
   screen -dmS "${session}"
   #Create screen windows
