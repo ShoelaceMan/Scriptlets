@@ -11,17 +11,18 @@ else
   readonly jobn="${2}"
 fi
 
-curl "${url}"|\
-  awk -F'[\"|<|>]' '/<\/a>/{print $3}'|\
-  grep -v ^$|\
+curl "${url}"| awk -F'[\"|<|>]' '/<\/a>/{print $3}'| grep -v ^$|\
   while read -r line; do
+    echo "Found ${url}${line}"
     echo "${url}${line}" >> "${list}"
   done
 
 echo "Index at ${list} generated, running aria with $(nproc) jobs."
 aria2c --follow-torrent=false\
        --check-certificate=false\
-        -Rcj "${jobn}" -m 0 -i "${list}"
+       --remote-time=true\
+       --continue=true\
+        -j "${jobn}" -m 0 -i "${list}"
 
 echo "Download complete, removing ${list}."
 rm -rfv "${list}"
