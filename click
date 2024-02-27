@@ -1,4 +1,4 @@
-#!/usr/bin/python2
+#!/usr/bin/python
 from Xlib import X, display
 from Xlib.ext.xtest import fake_input
 import time
@@ -21,7 +21,7 @@ while delta < 80:
     fake_input(d, X.ButtonPress, 1)
     fake_input(d, X.ButtonRelease, 1)
     d.sync()
-    time.sleep(0.02)
+    time.sleep(0.004)
     loc2 = d.screen().root.query_pointer()._data
     delta = abs(loc1["root_x"] - loc2["root_x"]) + \
         abs(loc1["root_y"] - loc2["root_y"])
