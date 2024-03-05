@@ -62,8 +62,8 @@ case "$1" in
 esac
 
 #Actual volume changing (readability low)
-amixout="$(amixer -c "$card" set "$interface" "$amixarg" | tail -n 1)"
-mute="$(awk -F"[][{}]" '{print $6}' <<<"$amixout")"
+amixout="$(amixer set "$interface" "$amixarg" | tail -n 1)"
+mute="$(awk -F"[][{}]" '{print $4}' <<<"$amixout")"
 vol="$(awk -F '[][{}]|%' '{print $2}' <<<"$amixout")"
 
 #Using named pipe to determine whether previous call still exists
