@@ -1,7 +1,19 @@
 #!/bin/bash
 battery_level="$(cat /sys/class/power_supply/BAT0/capacity)"
 ac_status="$(cat /sys/class/power_supply/BAT0/status)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${UID}/bus"
+export DISPLAY=':0'
+display_ids=()
 
-if [[ "${ac_status}" == 'Discharging' && "${battery_level}" -lt 30 ]]; then
-	notify-send -u critical "Battery is Low." "Level: $battery_level% "
-fi
+for display_proc in $(for proc_file in /proc/[0-9]*; do
+                      grep -ao 'DISPLAY=[^[:cntrl:]]*' "${proc_file}/environ" 2>/dev/null
+                    done|sort|uniq|awk -F"\=" '{print $2}'); do
+  display_ids+=("${display_proc}")
+done
+
+for display_id in "${display_ids[@]}"; do
+  export DISPLAY="${display_id}"
+  if [[ "${ac_status}" == 'Discharging' && "${battery_level}" -lt 30 ]]; then
+    notify-send -u critical "Battery is Low." "Level: $battery_level% "
+  fi
+done
