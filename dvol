@@ -14,8 +14,8 @@ width="200"         # window width
 dzen_bg="#151515"        # background colour of window
 dzen_fg="#eeeeee"        # foreground colour of text/icon
 
-bar_fg_muteoff="#808080"    # foreground colour of volume bar
-bar_fg_muteon="#aa3333"    # foreground colour of volume bar
+bar_fg_muteon="#808080"    # foreground colour of volume bar
+bar_fg_muteoff="#aa3333"    # foreground colour of volume bar
 bar_bg="#090909"    # background colour of volume bar
 bar_width="170"     # width of volume bar
 
