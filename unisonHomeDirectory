@@ -1,0 +1,40 @@
+#! /bin/bash
+#
+readonly unisonProfile='roamingRemoteHome'
+readonly unisonPrefer='newer'
+readonly unisonLog='unisonCronJob.log'
+readonly lockFilePath="${HOME}/.unison/unisonCronjob.lock"
+readonly testHost='prd.tardis.lan'
+readonly testPort='2049'
+
+# Check for lockfile, create if it doesn't exist
+echo "Unison CronJob..."
+echo "Checking if lock file at ${lockFilePath} exists."
+if [ -f "${lockFilePath}" ]; then
+  echo "Unison Cronjob can't start, lock file exists."
+  exit 1
+else
+  echo "Lock file does not exist, making one now."
+  echo $$ > "${lockFilePath}"
+  # Register a trap to clean up the lockfile
+  trap 'rm -fv ${lockFilePath}' 0 2 3 15
+fi
+
+# Run tests
+echo "Testing if host ${testHost} is reachable"
+if ! ping -c 3 "${testHost}"; then
+  echo "Can't ping unison host at ${testHost}, exiting."
+  exit 1
+fi
+
+echo "Testing if port ${testPort} is reachable on host ${testHost}"
+if ! nc -z "${testHost}" "${testPort}"; then
+  echo "Can't reach unison port at ${testPort}, exiting."
+  exit 1
+fi
+
+echo "Running unison with profile ${unisonProfile}.prf..."
+unison -auto -batch -silent \
+  -logfile "./${unisonLog}" \
+  -prefer "${unisonPrefer}" \
+  "${unisonProfile}.prf"
