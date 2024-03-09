@@ -6,6 +6,8 @@ readonly unisonLog='unisonCronJob.log'
 readonly lockFilePath="${HOME}/.unison/unisonCronjob.lock"
 readonly testHost='prd.tardis.lan'
 readonly testPort='2049'
+batteryLevel="$(cat /sys/class/power_supply/BAT0/capacity)"
+acStatus="$(cat /sys/class/power_supply/BAT0/status)"
 
 # Check for lockfile, create if it doesn't exist
 echo "Unison CronJob..."
@@ -31,6 +33,12 @@ echo "Testing if port ${testPort} is reachable on host ${testHost}"
 if ! nc -z "${testHost}" "${testPort}"; then
   echo "Can't reach unison port at ${testPort}, exiting."
   exit 1
+fi
+
+echo "Testing if laptop is on AC or if battery is low"
+if [[ "${acStatus}" == 'Discharging' && "${batteryLevel}" -lt 30 ]]; then
+	echo "Battery discharging and lower than ${batteryLevel}, exiting."
+	exit 1
 fi
 
 echo "Running unison with profile ${unisonProfile}.prf..."
