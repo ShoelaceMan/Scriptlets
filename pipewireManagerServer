@@ -1,0 +1,22 @@
+#! /bin/bash
+#
+# Default socket
+readonly pipeWireRunDir="/run/user"
+readonly pipeWireSocket="pipewire-0"
+readonly pipeWireSocketPath="${pipeWireRunDir}/${pipeWireSocket}"
+readonly pipeWirePort=5739
+# Manager socket
+readonly pipeWireManagerSocket="${pipeWireSocket}-manager"
+readonly pipeWireManagerSocketPath="${pwRunDir}/${pipeWireManagerSocket}"
+readonly pipeWireManagerPort=5740
+
+pipeWireListen() {
+  socat TCP-LISTEN:${pipeWirePort},reuseaddr,fork\
+    UNIX-CONNECT:"${pipeWireManagerSocketPath}"
+  SOCAT_PID1=${!}
+  socat TCP-LISTEN:${pipeWireManagerPort},reuseaddr,fork\
+    UNIX-CONNECT:"${pipeWireSocketPath}"
+  SOCAT_PID2=${!}
+}
+
+pipeWireListen
