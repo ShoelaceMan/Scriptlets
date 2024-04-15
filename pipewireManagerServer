@@ -1,7 +1,7 @@
 #! /bin/bash
 #
 # Default socket
-readonly pipeWireRunDir="/run/user"
+readonly pipeWireRunDir="/run/user/${UID}"
 readonly pipeWireSocket="pipewire-0"
 readonly pipeWireSocketPath="${pipeWireRunDir}/${pipeWireSocket}"
 readonly pipeWirePort=5739
