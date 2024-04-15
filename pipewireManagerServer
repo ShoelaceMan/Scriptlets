@@ -7,16 +7,18 @@ readonly pipeWireSocketPath="${pipeWireRunDir}/${pipeWireSocket}"
 readonly pipeWirePort=5739
 # Manager socket
 readonly pipeWireManagerSocket="${pipeWireSocket}-manager"
-readonly pipeWireManagerSocketPath="${pwRunDir}/${pipeWireManagerSocket}"
+readonly pipeWireManagerSocketPath="${pipeWireRunDir}/${pipeWireManagerSocket}"
 readonly pipeWireManagerPort=5740
 
 pipeWireListen() {
   socat TCP-LISTEN:${pipeWirePort},reuseaddr,fork\
-    UNIX-CONNECT:"${pipeWireManagerSocketPath}"
+    UNIX-CONNECT:"${pipeWireManagerSocketPath}" &
   SOCAT_PID1=${!}
+  echo "pipewire listening at PID ${SOCAT_PID1}"
   socat TCP-LISTEN:${pipeWireManagerPort},reuseaddr,fork\
-    UNIX-CONNECT:"${pipeWireSocketPath}"
+    UNIX-CONNECT:"${pipeWireSocketPath}" &
   SOCAT_PID2=${!}
+  echo "pipewire-manager listening at PID ${SOCAT_PID2}"
 }
 
 pipeWireListen
