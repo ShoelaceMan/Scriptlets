@@ -1,0 +1,80 @@
+#! /bin/bash
+#
+# Default socket
+readonly pipeWireRunDir="/run/user/${UID}/pipewire-remote"
+readonly pipeWireSocket="pipewire-0"
+readonly pipeWireSocketPath="${pipeWireRunDir}/${pipeWireSocket}"
+readonly pipeWirePort=5739
+# Manager socket
+readonly pipeWireManagerSocket="${pipeWireSocket}-manager"
+readonly pipeWireManagerSocketPath="${pipeWireRunDir}/${pipeWireManagerSocket}"
+readonly pipeWireManagerPort=5740
+# Host selection
+readonly pipeWireRemoteHost="${1}"
+
+cleanup(){
+  echo "Terminating socat processes..."
+  kill "${SOCAT_PID1}" "${SOCAT_PID2}"
+  echo "Terminating ssh processes..."
+  kill "${SSH_PID1}" "${SSH_PID2}"
+}
+
+wait_for_port() {
+  local port=$1
+  local max_attempts=5
+  local attempt=1
+  while ! ss -tnl | grep -q ":${port}"; do
+    echo "Waiting for port ${port} to be available..."
+    sleep 1
+    attempt=$((attempt + 1))
+    if [[ "${attempt}" -gt "${max_attempts}" ]]; then
+      echo "Failed to connect after ${max_attempts} attempts."
+      exit 1
+    fi
+  done
+}
+
+pipewire_connect(){
+  # Create the remote path, and populate it with lock files
+  mkdir -p "${pipeWireRunDir}"
+  touch "${pipeWireSocketPath}.lock"
+  touch "${pipeWireManagerSocketPath}.lock"
+
+  # Create SSH port forwards
+  ssh -L ${pipeWirePort}:localhost:${pipeWirePort} \
+    "${pipeWireRemoteHost}" -N &
+  SSH_PID1=${!}
+  echo "SSH running at PID ${SSH_PID1}"
+  ssh -L ${pipeWireManagerPort}:localhost:${pipeWireManagerPort} \
+    "${pipeWireRemoteHost}" -N &
+  SSH_PID2=${!}
+  echo "SSH running at PID ${SSH_PID2}"
+
+  # Wait for the SSH port forwards to be established
+  wait_for_port "${pipeWirePort}"
+  wait_for_port "${pipeWireManagerPort}"
+
+  # Listen on SSH port forwards, and redirect to a UNIX socket
+  socat UNIX-LISTEN:"${pipeWireSocketPath}",fork \
+    TCP:localhost:${pipeWirePort} &
+  SOCAT_PID1=${!}
+  echo "socat running at PID ${SOCAT_PID1}"
+  socat UNIX-LISTEN:"${pipeWireManagerSocketPath}",fork \
+    TCP:localhost:${pipeWireManagerPort} &
+  SOCAT_PID2=${!}
+  echo "socat running at PID ${SOCAT_PID2}"
+}
+
+# Trap SIGINT (Ctrl+C) to execute the cleanup function
+trap cleanup SIGINT
+
+# Connect to the remote pipewire server
+pipewire_connect
+
+# Run coppwr (in flatpak) against the remote sockets
+flatpak run --filesystem="${pipeWireRunDir}" \
+  --env=PIPEWIRE_RUNTIME_DIR="${pipeWireRunDir}" \
+  io.github.dimtpap.coppwr
+
+# Clean up at the end of script
+cleanup
