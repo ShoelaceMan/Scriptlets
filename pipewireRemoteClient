@@ -29,6 +29,7 @@ wait_for_port() {
     attempt=$((attempt + 1))
     if [[ "${attempt}" -gt "${max_attempts}" ]]; then
       echo "Failed to connect after ${max_attempts} attempts."
+      cleanup
       exit 1
     fi
   done
