@@ -13,10 +13,38 @@ readonly pipeWireManagerPort=5740
 readonly pipeWireRemoteHost="${1}"
 
 cleanup(){
-  echo "Terminating socat processes..."
-  kill "${SOCAT_PID1}" "${SOCAT_PID2}"
-  echo "Terminating ssh processes..."
-  kill "${SSH_PID1}" "${SSH_PID2}"
+  if [ -n "${SOCAT_PID1}" ]; then
+    if ps "${SOCAT_PID1}" > /dev/null 2>&1; then
+      echo "Terminating socat processes ${SOCAT_PID1}"
+      kill "${SOCAT_PID1}"
+    else
+      echo "No socat processes to terminate at ${SOCAT_PID1}"
+    fi
+  fi
+  if [ -n "${SOCAT_PID2}" ]; then
+    if ps "${SOCAT_PID2}" > /dev/null 2>&1; then
+      echo "Terminating socat processes ${SOCAT_PID2}"
+      kill "${SOCAT_PID2}"
+    else
+      echo "No socat processes to terminate at ${SOCAT_PID2}"
+    fi
+  fi
+  if [ -n "${SSH_PID1}" ]; then
+    if ps "${SSH_PID1}" > /dev/null 2>&1; then
+      echo "Terminating ssh processes ${SSH_PID1}"
+      kill "${SSH_PID1}"
+    else
+      echo "No ssh processes to terminate at ${SSH_PID1}"
+    fi
+  fi
+  if [ -n "${SSH_PID2}" ]; then
+    if ps "${SSH_PID2}" > /dev/null 2>&1; then
+      echo "Terminating ssh processes ${SSH_PID2}"
+      kill "${SSH_PID2}"
+    else
+      echo "No ssh processes to terminate at ${SSH_PID2}"
+    fi
+  fi
 }
 
 wait_for_port() {
