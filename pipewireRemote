@@ -56,11 +56,13 @@ pipewire_connect(){
   # Create SSH port forwards
   ssh -L ${pipeWirePort}:localhost:${pipeWirePort} \
     -o ExitOnForwardFailure=yes \
+    -o BatchMode=yes \
     "${pipeWireRemoteHost}" -N &
   SSH_PID1=${!}
   echo "SSH running at PID ${SSH_PID1}"
   ssh -L ${pipeWireManagerPort}:localhost:${pipeWireManagerPort} \
     -o ExitOnForwardFailure=yes \
+    -o BatchMode=yes \
     "${pipeWireRemoteHost}" -N &
   SSH_PID2=${!}
   echo "SSH running at PID ${SSH_PID2}"
