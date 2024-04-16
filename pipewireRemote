@@ -13,38 +13,22 @@ readonly pipeWireManagerPort=5740
 readonly pipeWireRemoteHost="${1}"
 
 cleanup(){
-  if [ -n "${SOCAT_PID1}" ]; then
-    if ps "${SOCAT_PID1}" > /dev/null 2>&1; then
-      echo "Terminating socat processes ${SOCAT_PID1}"
-      kill "${SOCAT_PID1}"
-    else
-      echo "No socat processes to terminate at ${SOCAT_PID1}"
-    fi
-  fi
-  if [ -n "${SOCAT_PID2}" ]; then
-    if ps "${SOCAT_PID2}" > /dev/null 2>&1; then
-      echo "Terminating socat processes ${SOCAT_PID2}"
-      kill "${SOCAT_PID2}"
-    else
-      echo "No socat processes to terminate at ${SOCAT_PID2}"
-    fi
-  fi
-  if [ -n "${SSH_PID1}" ]; then
-    if ps "${SSH_PID1}" > /dev/null 2>&1; then
-      echo "Terminating ssh processes ${SSH_PID1}"
-      kill "${SSH_PID1}"
-    else
-      echo "No ssh processes to terminate at ${SSH_PID1}"
-    fi
-  fi
-  if [ -n "${SSH_PID2}" ]; then
-    if ps "${SSH_PID2}" > /dev/null 2>&1; then
-      echo "Terminating ssh processes ${SSH_PID2}"
-      kill "${SSH_PID2}"
-    else
-      echo "No ssh processes to terminate at ${SSH_PID2}"
-    fi
-  fi
+  # Iterate against SSH and SOCAT
+  for pidtypevar in SOCAT SSH; do
+    # Nested loop to clean on both ports
+    for pidnumvar in PID1 PID2; do
+      # Squash above into a "combined" var (like $SOCAT_PID1)
+      local pidvar="${pidtypevar}_${pidnumvar}"
+      if [ -n "${!pidvar}" ]; then
+        if ps "${!pidvar}" > /dev/null 2>&1; then
+          echo "Terminating ${!pidtypevar} process at PID ${!pidvar}"
+          kill "${!pidvar}"
+        else
+          echo "No ${pidtypevar} process to terminate at PID ${!pidvar}"
+        fi
+      fi
+    done
+  done
 }
 
 wait_for_port() {
@@ -79,9 +63,15 @@ pipewire_connect(){
   SSH_PID2=${!}
   echo "SSH running at PID ${SSH_PID2}"
 
-  # Wait for the SSH port forwards to be established
-  wait_for_port "${pipeWirePort}"
-  wait_for_port "${pipeWireManagerPort}"
+  # Check to see if the SSH processes are still live
+  if ps ${SSH_PID1} > /dev/null 2>&1 && ps ${SSH_PID2} > /dev/null 2>&1 ; then
+    # Wait for the SSH port forwards to be established
+    wait_for_port "${pipeWirePort}"
+    wait_for_port "${pipeWireManagerPort}"
+  else
+    echo "SSH processes no longer running at PID ${SSH_PID1} or ${SSH_PID2}"
+    exit 1
+  fi
 
   # Listen on SSH port forwards, and redirect to a UNIX socket
   socat UNIX-LISTEN:"${pipeWireSocketPath}",fork \
