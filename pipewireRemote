@@ -21,7 +21,7 @@ cleanup(){
       local pidvar="${pidtypevar}_${pidnumvar}"
       if [ -n "${!pidvar}" ]; then
         if ps "${!pidvar}" > /dev/null 2>&1; then
-          echo "Terminating ${!pidtypevar} process at PID ${!pidvar}"
+          echo "Terminating ${pidtypevar} process at PID ${!pidvar}"
           kill "${!pidvar}"
         else
           echo "No ${pidtypevar} process to terminate at PID ${!pidvar}"
