@@ -13,22 +13,33 @@ readonly pipeWireManagerPort=5740
 readonly pipeWireRemoteHost="${1}"
 
 cleanup(){
-  # Iterate against SSH and SOCAT
-  for pidtypevar in SOCAT SSH; do
-    # Nested loop to clean on both ports
-    for pidnumvar in PID1 PID2; do
-      # Squash above into a "combined" var (like $SOCAT_PID1)
-      local pidvar="${pidtypevar}_${pidnumvar}"
-      if [ -n "${!pidvar}" ]; then
-        if ps "${!pidvar}" > /dev/null 2>&1; then
-          echo "Terminating ${pidtypevar} process at PID ${!pidvar}"
-          kill "${!pidvar}"
-        else
-          echo "No ${pidtypevar} process to terminate at PID ${!pidvar}"
-        fi
+  # Nested loop to clean on both ports
+  for pidvar in SOCAT_PID1 SOCAT_PID2; do
+    if [ -n "${!pidvar}" ]; then
+      if ps "${!pidvar}" > /dev/null 2>&1; then
+        echo "Terminating socat process at PID ${!pidvar}"
+        kill "${!pidvar}"
+      else
+        echo "No socat process to terminate at PID ${!pidvar}"
       fi
-    done
+    fi
   done
+
+  # Kill the PIDs listening on our ports if launched by this script
+  if [ "${SSH_NONMANAGER_PORT}" == "True" ]; then
+    for ssh_pid in $(lsof -i tcp:${pipeWireManagerPort}\
+                      |awk 'NR!=1 {print $2}'|uniq); do
+      echo "Killing SSH process at PID ${ssh_pid} for nonmanager port"
+      kill "${ssh_pid}"
+    done
+  fi
+  if [ "${SSH_MANAGER_PORT}" == "True" ]; then
+    for ssh_pid in $(lsof -i tcp:${pipeWirePort}\
+                      |awk 'NR!=1 {print $2}'|uniq); do
+      echo "Killing SSH process at PID ${ssh_pid} for manager port"
+      kill "${ssh_pid}"
+    done
+  fi
 }
 
 wait_for_port() {
@@ -53,27 +64,27 @@ pipewire_connect(){
   touch "${pipeWireSocketPath}.lock"
   touch "${pipeWireManagerSocketPath}.lock"
 
-  # Create SSH port forwards
-  ssh -L ${pipeWirePort}:localhost:${pipeWirePort} \
-    -o ExitOnForwardFailure=yes \
-    -o BatchMode=yes \
-    "${pipeWireRemoteHost}" -N &
-  SSH_PID1=${!}
-  echo "SSH running at PID ${SSH_PID1}"
-  ssh -L ${pipeWireManagerPort}:localhost:${pipeWireManagerPort} \
-    -o ExitOnForwardFailure=yes \
-    -o BatchMode=yes \
-    "${pipeWireRemoteHost}" -N &
-  SSH_PID2=${!}
-  echo "SSH running at PID ${SSH_PID2}"
-
-  # Check to see if the SSH processes are still live
-  if ps ${SSH_PID1} > /dev/null 2>&1 && ps ${SSH_PID2} > /dev/null 2>&1 ; then
+  # Create SSH port forwards and ensure that the port is listening
+  if ssh -L ${pipeWirePort}:localhost:${pipeWirePort} \
+      -o ExitOnForwardFailure=yes \
+      -o BatchMode=yes \
+      "${pipeWireRemoteHost}" -fN; then
+    SSH_NONMANAGER_PORT="True"
     # Wait for the SSH port forwards to be established
     wait_for_port "${pipeWirePort}"
+  else
+    echo "SSH port forwarding failed at port ${pipeWirePort}"
+    exit 1
+  fi
+  if ssh -L ${pipeWireManagerPort}:localhost:${pipeWireManagerPort} \
+      -o ExitOnForwardFailure=yes \
+      -o BatchMode=yes \
+      "${pipeWireRemoteHost}" -fN; then
+    SSH_MANAGER_PORT="True"
+    # Wait for the SSH port forwards to be established
     wait_for_port "${pipeWireManagerPort}"
   else
-    echo "SSH processes no longer running at PID ${SSH_PID1} or ${SSH_PID2}"
+    echo "SSH port forwarding failed at port ${pipeWireManagerPort}"
     exit 1
   fi
 
