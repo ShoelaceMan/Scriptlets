@@ -35,7 +35,7 @@ wait_for_port() {
   local port=$1
   local max_attempts=5
   local attempt=1
-  while ! ss -tnl | grep -q ":${port}"; do
+  while ! nc -z localhost "${port}"; do
     echo "Waiting for port ${port} to be available..."
     sleep 1
     attempt=$((attempt + 1))
