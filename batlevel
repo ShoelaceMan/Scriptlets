@@ -21,8 +21,6 @@ if compgen "/sys/class/power_supply/BAT*"; then
     battery_level=$(cat "${battery_path}/capacity")
 
     # Start printing information
-    printf '%s' "${battery_index}"
-    printf ':'
     printf ' %s%%' "${battery_level}"
   done
 fi
