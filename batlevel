@@ -1,16 +1,28 @@
 #! /bin/bash
 
+# If any batteries exist, enter loop
 if compgen "/sys/class/power_supply/BAT*"; then
+  # Check if battery is on AC or not, then print a cute little power indicator
+  if [[ $(cat "/sys/class/power_supply/ADP"[0-9]*"/online") -ge '1' ]]; then
+    printf '\xf0\x9f\x94\x8c'
+  else
+    printf '\xe2\x9a\xa1'
+  fi
+
+  # Iterate over all of the batteries
   for battery_path in "/sys/class/power_supply/BAT"*; do
-    if [[ $(cat "${battery_path}/status") == 'Charging' ]]; then
-      battery_status=' (AC)'
-    else
-      battery_status=''
+    # If this isn't the first run, add a separator
+    if [[ -v "${battery_index}" ]]; then
+      printf ', '
     fi
 
-    battery_name=$(basename "${battery_path}"|sed 's/^BAT/Battery /')
+    # Get battery information
+    battery_index=$(basename "${battery_path}"|sed 's/^BAT//')
     battery_level=$(cat "${battery_path}/capacity")
-    printf '%s:' "${battery_name}${battery_status}"
-    printf ' %s%%\t' "${battery_level}"
+
+    # Start printing information
+    printf '%s' "${battery_index}"
+    printf ':'
+    printf ' %s%%' "${battery_level}"
   done
 fi
