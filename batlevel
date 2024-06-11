@@ -1,0 +1,16 @@
+#! /bin/bash
+
+if compgen "/sys/class/power_supply/BAT*"; then
+  for battery_path in "/sys/class/power_supply/BAT"*; do
+    if [[ $(cat "${battery_path}/status") == 'Charging' ]]; then
+      battery_status='(Charging)'
+    else
+      battery_status=''
+    fi
+
+    battery_name=$(basename "${battery_path}"|sed 's/^BAT/Battery /')
+    battery_level=$(cat "${battery_path}/capacity")
+    printf '%s:' "${battery_name}"
+    printf ' %s%%\t' "${battery_status} ${battery_level}"
+  done
+fi
