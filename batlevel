@@ -3,7 +3,7 @@
 if compgen "/sys/class/power_supply/BAT*"; then
   for battery_path in "/sys/class/power_supply/BAT"*; do
     if [[ $(cat "${battery_path}/status") == 'Charging' ]]; then
-      battery_status='(Charging)'
+      battery_status='(AC)'
     else
       battery_status=''
     fi
