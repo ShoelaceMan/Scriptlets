@@ -3,7 +3,7 @@
 # If any batteries exist, enter loop
 if compgen "/sys/class/power_supply/BAT*"; then
   # Check if battery is on AC or not, then print a cute little power indicator
-  if [[ $(cat "/sys/class/power_supply/ADP"[0-9]*"/online") -ge '1' ]]; then
+  if [[ $(cat "/sys/class/power_supply/A"[CD]*"/online") -ge '1' ]]; then
     printf '\xf0\x9f\x94\x8c'
   else
     printf '\xe2\x9a\xa1'
