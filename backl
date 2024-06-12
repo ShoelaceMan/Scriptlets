@@ -1,19 +1,35 @@
 #!/bin/bash
 #
-#
-offset=10
-devicepath='/sys/class/backlight/acpi_video0/brightness'
-current=$(cat "$devicepath")
+steps=12
+max=$(cat "/sys/class/backlight/"*"/max_brightness")
+current=$(cat "/sys/class/backlight/"*"/brightness")
+offset=$(( max / steps ))
 
-#Argument Parsing
+# Argument Parsing
 case "$1" in
   '-i'|'--increase')
-    function="+ $offset"
+    adjusted=$((current + offset))
     ;;
   '-d'|'--decrease')
-    function="- $offset"
+    adjusted=$((current - offset))
     ;;
+  *)
+    echo 'Improper usage'
+    exit 1
+  ;;
 esac
 
+# Limits checking
+if [[ ${adjusted} -gt ${max} ]]; then
+  # If the current brightness + 1 step would be higher than max, apply max
+  adjusted="${max}"
+fi
+if [[ ${adjusted} -le 0 ]]; then
+  # If current brightness - 1 step would be >= 0, apply 1 step value
+  adjusted="${offset}"
+fi
+
 # Run the actual command
-echo $(($current $function)) > "$devicepath"
+for backlight_descriptor in /sys/class/backlight/*/brightness; do
+  echo "${adjusted}" > "${backlight_descriptor}"
+done
