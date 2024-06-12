@@ -1,7 +1,7 @@
 #! /bin/bash
 
 # If any batteries exist, enter loop
-if compgen -G "/sys/class/power_supply/BAT*"; then
+if compgen -G "/sys/class/power_supply/BAT*" > /dev/null; then
   # Check if battery is on AC or not, then print a cute little power indicator
   if [[ $(cat "/sys/class/power_supply/A"[CD]*"/online") -ge '1' ]]; then
     printf '\xf0\x9f\x94\x8c'
