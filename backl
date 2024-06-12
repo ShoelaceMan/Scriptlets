@@ -25,8 +25,8 @@ if [[ ${adjusted} -gt ${max} ]]; then
   adjusted="${max}"
 fi
 if [[ ${adjusted} -le 0 ]]; then
-  # If current brightness - 1 step would be >= 0, apply 1 step value
-  adjusted="${offset}"
+  # If current brightness - 1 step would be >= 0, do nothing
+  adjusted="${current}"
 fi
 
 # Run the actual command
