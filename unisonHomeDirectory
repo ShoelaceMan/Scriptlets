@@ -4,8 +4,8 @@ readonly unisonProfile='roamingRemoteHome'
 readonly unisonPrefer='newer'
 readonly unisonLog='unisonCronJob.log'
 readonly lockFilePath="${HOME}/.unison/unisonCronjob.lock"
-readonly testHost='prd.tardis.lan'
-readonly testPort='2049'
+readonly testHost='10.6.0.71'
+readonly testPort='5001'
 batteryLevel="$(cat /sys/class/power_supply/BAT0/capacity)"
 acStatus="$(cat /sys/class/power_supply/BAT0/status)"
 
@@ -32,14 +32,6 @@ fi
 echo "Testing if port ${testPort} is reachable on host ${testHost}"
 if ! nc -z "${testHost}" "${testPort}"; then
   echo "Can't reach unison port at ${testPort}, exiting."
-  exit 1
-fi
-
-echo "Testing if /mnt/remote-home/${USER} is mounted"
-# Make sure that autofs has the directory mounted
-ls "/mnt/remote-home/${USER}"/ > /dev/null
-if ! mount | awk '{if ($3 == "/mnt/remote-home/tarcuri") { exit 0 }} ENDFILE{exit -1}'; then
-  echo "/mnt/remote-home/${USER} is not mounted, exiting."
   exit 1
 fi
 
