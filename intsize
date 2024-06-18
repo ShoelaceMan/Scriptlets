@@ -22,7 +22,7 @@ fontsize=$(bc <<< "scale=0; sqrt($(($((c**2)) - $((b**2)))))")
 
 echo "Font set to $fontname $fontsize"
 xrandr --dpi $measureddots
-echo "echo Xft.dpi: ${measureddots}" | xrdb -merge -
+echo "Xft.dpi: ${measureddots}" | xrdb -merge -
 sed -i "s/gtk-font-name=.*/gtk-font-name=$fontname $fontsize/g" ~/.config/gtk-3.0/settings.ini
 sed -i "s/gtk-font-name=.*/gtk-font-name=\"$fontname $fontsize\"/g" ~/.gtkrc-2.0
 gsettings set org.gnome.desktop.interface document-font-name "$fontname $fontsize"
