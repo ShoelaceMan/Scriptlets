@@ -1,7 +1,10 @@
 #! /bin/bash
 #
 # This sets the blank/cycle time but only on a battery powered machine
+
+source ~/.local/envrc
+
 if [ -d '/sys/class/power_supply/BAT0' ]; then
   # Cycle time to allow the cute dimming from dim-screen.sh prior to locking
-  xset s 60 15
+  xset s  "${blankTime}" "${cycleTime}"
 fi
