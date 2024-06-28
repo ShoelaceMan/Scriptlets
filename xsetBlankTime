@@ -6,5 +6,5 @@ source ~/.local/envrc
 
 if [ -d '/sys/class/power_supply/BAT0' ]; then
   # Cycle time to allow the cute dimming from dim-screen.sh prior to locking
-  xset s  "${blankTime}" "${cycleTime}"
+  xset s  "${blanktime}" "${cycletime}"
 fi
