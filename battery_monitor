@@ -14,6 +14,9 @@ done
 for display_id in "${display_ids[@]}"; do
   export DISPLAY="${display_id}"
   if [[ "${ac_status}" == 'Discharging' && "${battery_level}" -lt 30 ]]; then
-    notify-send -u critical "Battery is Low." "Level: $battery_level% "
+    notify-send -t 59000 -u critical \
+      -a "battery_monitor" \
+      "Battery is Low." \
+      "Level: $battery_level %"
   fi
 done
