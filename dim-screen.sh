@@ -21,7 +21,7 @@ fade_brightness() {
   xbacklight -time $fade_time -steps $fade_steps -set "${1}"
 }
 
-for displayAdapter in "/sys/class/drm/"card[1-9]"-"*; do
+for displayAdapter in "/sys/class/drm/"card[0-9]"-"*; do
   adapterStatus=$(cat "$displayAdapter"/enabled)
   if [ "${adapterStatus}" == "enabled" ]; then
     if ! [ -d "${displayAdapter}/intel_backlight" ]; then
