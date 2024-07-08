@@ -10,19 +10,50 @@ fade_steps=20
 ###############################################################################
 
 get_brightness() {
-    xbacklight -get
+  xbacklight -get
 }
 
 set_brightness() {
-    xbacklight -steps 1 -set "${1}"
+  xbacklight -steps 1 -set "${1}"
 }
 
 fade_brightness() {
-    xbacklight -time $fade_time -steps $fade_steps -set "${1}"
+  xbacklight -time $fade_time -steps $fade_steps -set "${1}"
 }
 
-trap 'exit 0' TERM INT
-trap "set_brightness $(get_brightness); kill %%" EXIT
-fade_brightness $min_brightness
+for displayAdapter in "/sys/class/drm/"card[1-9]"-"*; do
+  adapterStatus=$(cat "$displayAdapter"/enabled)
+  if [ "${adapterStatus}" == "enabled" ]; then
+    if ! [ -d "${displayAdapter}/intel_backlight" ]; then
+      # Detect if xsecurelock dimmer exists
+      if [ -d /usr/lib/xsecurelock ]; then
+        # If the above path exists, we can make a fallback dimmer that doesn't
+        #  rely on intel_backlight
+        dimMode="xsecurelock"
+        xsl_bin="/usr/lib/xsecurelock"
+        fallback_dimmer="${xsl_bin}/dimmer"
+      fi
+      break
+    fi
+  fi
+done
+
+if [ "${dimMode}" = "xsecurelock" ]; then
+  # We enter here if one or more of the adapters that are enabled do not
+  #  support xrandr backlight extensions
+  ${fallback_dimmer}
+elif [ "${dimMode}" = "none" ]; then
+  # We don't do anything if there is no dimmer set
+  :
+else
+  # We enter here if all of the adapters that are enabled support xrandr
+  #  backlight extensions
+  # Trap early-exits
+  trap 'exit 0' TERM INT
+  trap "set_brightness $(get_brightness); kill %%" EXIT
+
+  fade_brightness ${min_brightness}
+fi
+
 sleep 2147483647 &
 wait
