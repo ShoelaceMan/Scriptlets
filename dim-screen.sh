@@ -46,7 +46,7 @@ for displayAdapter in "/sys/class/drm/"card[0-9]"-"*; do
         #  rely on intel_backlight
         dimMode="xsecurelock"
         xsl_bin="/usr/lib/xsecurelock"
-        fallback_dimmer="${xsl_bin}/dimmer"
+        fallback_dimmer="${xsl_bin}/until_nonidle ${xsl_bin}/dimmer"
       else
         # No dimmer if there is no available alternative
         dimMode="none"
