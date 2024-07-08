@@ -41,6 +41,9 @@ done
 if [ "${dimMode}" = "xsecurelock" ]; then
   # We enter here if one or more of the adapters that are enabled do not
   #  support xrandr backlight extensions
+  # Set some parameters for the xsl dimmer
+  export XSECURELOCK_DIM_TIME_MS="${fade_time}"
+  export XSECURELOCK_WAIT_TIME_MS=14600
   ${fallback_dimmer}
 elif [ "${dimMode}" = "none" ]; then
   # We don't do anything if there is no dimmer set
