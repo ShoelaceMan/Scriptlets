@@ -8,20 +8,41 @@
 # It has been tuned for my eyes, if you find it annoying, or hard to read, you'll have to
 # adjust the formulas.
 
-source ~/.local/envrc
+# Declare variables (that get overwritten by the source)
+measureddots=''
+distance=''
+fontname=''
+termname=''
+termfontname=''
+
+# Shellcheck can't read this on my system, ignoring
+# shellcheck disable=SC1091
+source "${HOME}/.local/envrc"
 
 xres=$(xdpyinfo | grep dimensions | awk '{print $2}' | awk -F "x" '{print $1}')
 yres=$(xdpyinfo | grep dimensions | awk '{print $2}' | awk -F "x" '{print $2}')
 combres=$((xres * yres))
-squareddots=$(($measureddots**2))
+squareddots=$((measureddots**2))
 combsquare=$((combres / squareddots))
 squaredpix=$(bc <<< "scale=0; sqrt($((combsquare)))")
 c=$((squaredpix + distance))
 b=$((squaredpix))
-fontsize=$(bc <<< "scale=0; sqrt($(($((c**2)) - $((b**2)))))")
+if [ -z "${fontsize}" ]; then
+  fontsize=$(bc <<< "scale=0; sqrt($(($((c**2)) - $((b**2)))))")
+fi
+if [ -z "${termfontsize}" ]; then
+  termfontsize=$(bc <<< "scale=0; sqrt($(($((c**2)) - $((b**2)))))")
+else
+  echo "termfontsize overwritten as ${termfontsize}"
+fi
+termfontstring="${termname}.font:${termfontname}:pixelsize=${termfontsize}:antialias=true"
+
 
 echo "Font set to $fontname $fontsize"
-xrandr --dpi $measureddots
+xrandr --dpi "${measureddots}"
+
+echo "Setting terminal font to ${termfontstring}"
+echo "${termfontstring}" | xrdb -merge -
 echo "Xft.dpi: ${measureddots}" | xrdb -merge -
 sed -i "s/gtk-font-name=.*/gtk-font-name=$fontname $fontsize/g" ~/.config/gtk-3.0/settings.ini
 sed -i "s/gtk-font-name=.*/gtk-font-name=\"$fontname $fontsize\"/g" ~/.gtkrc-2.0
