@@ -12,4 +12,5 @@ trap 'rm -rfv "${src_dir}"' EXIT
 #
 (cd "${src_dir}" || exit
 git clone https://aur.archlinux.org/yay.git
+cd "yay" || exit
 makepkg -si)
