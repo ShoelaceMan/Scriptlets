@@ -1,0 +1,15 @@
+#! /bin/bash
+
+# Make a temp directory for the build
+#
+src_dir=$(mktemp -d)
+
+# Clean up after ourselves on exit
+#
+trap 'rm -rfv "${src_dir}"' EXIT
+
+# Build in subshell
+#
+(cd "${src_dir}" || exit
+git clone https://aur.archlinux.org/yay.git
+makepkg -si)
