@@ -6,8 +6,8 @@ readonly unisonLog='unisonCronJob.log'
 readonly lockFilePath="${HOME}/.unison/unisonCronjob.lock"
 readonly testHost='10.6.0.71'
 readonly testPort='5001'
-batteryLevel="$(cat /sys/class/power_supply/BAT0/capacity)"
-acStatus="$(cat /sys/class/power_supply/BAT0/status)"
+batteryLevel="$(cat /sys/class/power_supply/BAT*/capacity)"
+acStatus="$(cat /sys/class/power_supply/BAT*/status)"
 
 # Check for lockfile, create if it doesn't exist
 echo "Unison CronJob..."
