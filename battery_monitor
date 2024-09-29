@@ -20,9 +20,9 @@ get_battery_level() {
 
 get_ac_status(){
     if ! [[ $(cat "/sys/class/power_supply/A"[CD]*"/online") -ge '1' ]]; then
-      echo "0"
+      echo 'Discharging'
     else
-      echo "1"
+      echo 'Charging'
     fi
 }
 
