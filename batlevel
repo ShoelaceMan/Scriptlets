@@ -2,11 +2,13 @@
 
 # If any batteries exist, enter loop
 if compgen -G "/sys/class/power_supply/BAT*" > /dev/null; then
-  # Check if battery is on AC or not, then print a cute little power indicator
-  if [[ $(cat "/sys/class/power_supply/A"[CD]*"/online") -ge '1' ]]; then
-    printf '\xf0\x9f\x94\x8c'
-  else
-    printf '\xe2\x9a\xa1'
+  if ! [[ $1 == 'CLEAN' ]]; then
+    # Check if battery is on AC or not, then print a cute little power indicator
+    if [[ $(cat "/sys/class/power_supply/A"[CD]*"/online") -ge '1' ]]; then
+      printf '\xf0\x9f\x94\x8c'
+    else
+      printf '\xe2\x9a\xa1'
+    fi
   fi
 
   # Iterate over all of the batteries
@@ -21,6 +23,10 @@ if compgen -G "/sys/class/power_supply/BAT*" > /dev/null; then
     battery_level=$(cat "${battery_path}/capacity")
 
     # Start printing information
-    printf ' %s%%' "${battery_level}"
+    if ! [[ $1 == 'CLEAN' ]]; then
+      printf ' %s%%' "${battery_level}"
+    else
+      printf '%s' "${battery_level}"
+    fi
   done
 fi
