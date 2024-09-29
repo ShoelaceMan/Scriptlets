@@ -1,13 +1,40 @@
 #!/bin/bash
-battery_level="$(cat /sys/class/power_supply/BAT*/capacity)"
-ac_status="$(cat /sys/class/power_supply/BAT*/status)"
+
+get_battery_level() {
+  # Initialize variables
+  total_battery_level=0
+
+  # If any batteries exist, enter loop
+  if compgen -G "/sys/class/power_supply/BAT*" > /dev/null; then
+    # Iterate over all of the batteries
+    for battery_path in "/sys/class/power_supply/BAT"*; do
+      # Get battery information
+      battery_level=$(cat "${battery_path}/capacity")
+      total_battery_level=$(( battery_level + total_battery_level ))
+
+      # Return the battery level
+      echo "${total_battery_level}"
+    done
+  fi
+}
+
+get_ac_status(){
+    if ! [[ $(cat "/sys/class/power_supply/A"[CD]*"/online") -ge '1' ]]; then
+      echo "0"
+    else
+      echo "1"
+    fi
+}
+
+battery_level="$(get_battery_level)"
+ac_status="$(get_ac_status)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${UID}/bus"
 export DISPLAY=':0'
 display_ids=()
 
 for display_proc in $(for proc_file in /proc/[0-9]*; do
                       grep -ao 'DISPLAY=[^[:cntrl:]]*' "${proc_file}/environ" 2>/dev/null
-                    done|sort|uniq|awk -F"\=" '{print $2}'); do
+                    done|sort|uniq|awk -F'=' '{print $2}'); do
   display_ids+=("${display_proc}")
 done
 
