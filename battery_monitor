@@ -1,6 +1,6 @@
 #!/bin/bash
-battery_level="$(cat /sys/class/power_supply/BAT0/capacity)"
-ac_status="$(cat /sys/class/power_supply/BAT0/status)"
+battery_level="$(cat /sys/class/power_supply/BAT*/capacity)"
+ac_status="$(cat /sys/class/power_supply/BAT*/status)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/${UID}/bus"
 export DISPLAY=':0'
 display_ids=()
