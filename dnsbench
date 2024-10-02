@@ -53,12 +53,14 @@ WHITELIST_URL = f"{WHITELIST_URL_BASE}/whitelist/master/domains/whitelist.txt"
 NAMESERVERS = [
     ("10.6.0.10", "AdguardHome 1"),
     ("10.6.0.11", "AdguardHome 2"),
-    ("10.6.0.12", "AdguardHome 3"),
+    ("10.3.4.12", "AdguardHome 3"),
     ("10.6.0.20", "Pihole 1     "),
     ("10.6.0.21", "Pihole 2     "),
     ("10.6.0.62", "Windows DNS 1"),
     ("10.6.0.63", "Windows DNS 2"),
-    ("10.6.0.1", "Unbound 1     ")]
+    ("10.6.0.30", "Unbound 1    "),
+    ("10.6.0.31", "Unbound 2    "),
+    ("10.3.4.32", "Unbound 3    ")]
 
 
 # Fetch the whitelist domains
