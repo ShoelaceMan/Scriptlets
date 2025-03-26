@@ -35,7 +35,7 @@ for displayAdapter in "/sys/class/drm/"card[0-9]"-"*; do
   echo "Adapter ${displayAdapter}: ${adapterStatus}"
   # Check if every adapters upports xrandr backlight extensions
   if [ "${adapterStatus}" == "enabled" ]; then
-    if [ -d "${displayAdapter}/intel_backlight" ]; then
+    if xbacklight -get; then
       # We can just set this for every enabled adapter and break later if we
       #  detect one that doesn't support the extension
       dimMode="xbacklight"
