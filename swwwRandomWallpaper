@@ -5,7 +5,7 @@ WALLPAPER_DIR="${1}"
 IMG=$(find "$WALLPAPER_DIR" -type f \( -iname '*.jpg' -o -iname '*.png' \) | shuf -n1)
 
 if [ -n "$IMG" ]; then
-  swww img "$IMG" --transition-type any
+  swww img "$IMG" --transition-type random
 else
   echo "No wallpapers found in $WALLPAPER_DIR"
   exit 1
