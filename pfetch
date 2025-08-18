@@ -3,9 +3,17 @@
 exec 2> /dev/null
 #Show terminal colors
 pcs() {
-  for i in {0..7}; do
-    echo -en "\e[${1}$((30+$i))m \u2588\u2588 \e[0m"
-  done
+  local mode="$1"   # "" or "bright"
+  local base=30
+  [[ "$mode" == "bright" ]] && base=90
+  for i in {0..7}; do printf "\e[$((base+i))m██\e[0m "; done
+}
+
+pcb() {
+  local mode="$1"   # "" or "bright"
+  local base=40
+  [[ "$mode" == "bright" ]] && base=100
+  for i in {0..7}; do printf "\e[$((base+i))m  \e[0m "; done
 }
 
 # Main information fetching
@@ -34,47 +42,41 @@ if [ -z "${wm}" ]; then
   fi
 fi
 
-#non-color effects
-bc="$(tput bold)"		  # bold
-rc="$(tput sgr0)"		  # rc
-ul="$(tput smul)"		  # rc
-lu="$(tput rmul)"		  # rc
-#foreground colors
-c0="$(tput setaf 0)"	# black
-c1="$(tput setaf 1)"	# red
-c2="$(tput setaf 2)"	# green
-c3="$(tput setaf 3)"	# yellow
-c4="$(tput setaf 4)"	# blue
-c5="$(tput setaf 5)"	# magenta
-c6="$(tput setaf 6)"	# cyan
-c7="$(tput setaf 7)"	# white
-#background colors
-bc0="$(tput setab 0)"	# black
-bc1="$(tput setab 1)"	# red
-bc2="$(tput setab 2)"	# green
-bc3="$(tput setab 3)"	# yellow
-bc4="$(tput setab 4)"	# blue
-bc5="$(tput setab 5)"	# magenta
-bc6="$(tput setab 6)"	# cyan
-bc7="$(tput setab 7)"	# white
+# attributes
+bc="$(tput bold)"         # bold on
+rc="$(tput sgr0)"         # reset
+ul="$(tput smul)"         # underline on
+lu="$(tput rmul)"         # underline off
 
-# Text and logo colors
-lc="${c5}"      # labels
-nc="${ul}${c5}"	# user and hostname
-ic="${rc}"	    # info
+# normal 0..7 (foreground/background)
+c0="$(tput setaf 0)"; c1="$(tput setaf 1)"; c2="$(tput setaf 2)"; c3="$(tput setaf 3)"
+c4="$(tput setaf 4)"; c5="$(tput setaf 5)"; c6="$(tput setaf 6)"; c7="$(tput setaf 7)"
+bc0="$(tput setab 0)"; bc1="$(tput setab 1)"; bc2="$(tput setab 2)"; bc3="$(tput setab 3)"
+bc4="$(tput setab 4)"; bc5="$(tput setab 5)"; bc6="$(tput setab 6)"; bc7="$(tput setab 7)"
+
+# true BRIGHT 90..97 / 100..107 (not bold!)
+C0=$'\e[90m'; C1=$'\e[91m'; C2=$'\e[92m'; C3=$'\e[93m'
+C4=$'\e[94m'; C5=$'\e[95m'; C6=$'\e[96m'; C7=$'\e[97m'
+BC0=$'\e[100m'; BC1=$'\e[101m'; BC2=$'\e[102m'; BC3=$'\e[103m'
+BC4=$'\e[104m'; BC5=$'\e[105m'; BC6=$'\e[106m'; BC7=$'\e[107m'
+
+# label/identity colors
+lc="${C5}"          # labels (bright magenta)
+nc="${ul}${C5}"     # user@host (underlined bright magenta)
+ic="${rc}"          # info (default fg)
 
 #Draw ascii art and print fetch
 cat << EOF
- $bc$c7       $rc         $nc$USER$ic@$nc$host$rc
- $bc$c7    ▄▄▄$rc         ${lc}OS:       $ic$os$rc
- $bc$c7 ▄█████▄▄ $rc      ${lc}KERNEL:   $ic$kernel
- $bc$c7███$bc6▀▀▀▀$bc0▀$bc6▀$bc0▀$bc6▀$rc     ${lc}UPTIME:   $ic$uptime
- $bc$c7███$bc6▄   $c0▀ ▀$rc$c6▀$rc     ${lc}PACKAGES: $ic$packages
- $bc$c7 ▄$bc6  $rc$bc$c7█████▄ $rc$c1█▄$rc   ${lc}SHELL:    $ic$shell
- $rc$c1▀▀$rc$bc$bc1$c7▄$bc6▄   $bc1▄▄▄$rc$c1▀██▀$rc  ${lc}WM:       $ic$wm
- $bc$c7 ██▀▀▀██▀  $rc$c1▀$rc    ${lc}CPU:     $ic$cpu$rc
- $bc$c7 ▀▀▀▀ ▀▀▀▀$rc      ${lc}RAM:      $ic$ram$rc
+ $bc$C7       $rc         $nc$USER$ic@$nc$host$rc
+ $bc$C7    ▄▄▄$rc         ${lc}OS:       $ic$os$rc
+ $bc$C7 ▄█████▄▄ $rc      ${lc}KERNEL:   $ic$kernel
+ $bc$C7███$BC6▀▀▀▀$bc0▀$BC6▀$bc0▀$BC6▀$rc     ${lc}UPTIME:   $ic$uptime
+ $bc$C7███$BC6▄   $c0▀ ▀$rc$C6▀$rc     ${lc}PACKAGES: $ic$packages
+ $bc$C7 ▄$BC6  $rc$bc$C7█████▄ $rc$C1█▄$rc   ${lc}SHELL:    $ic$shell
+ $rc$C1▀▀$rc$bc$BC1$C7▄$BC6▄   $BC1▄▄▄$rc$C1▀██▀$rc  ${lc}WM:       $ic$wm
+ $bc$C7 ██▀▀▀██▀  $rc$C1▀$rc    ${lc}CPU:     $ic$cpu$rc
+ $bc$C7 ▀▀▀▀ ▀▀▀▀$rc      ${lc}RAM:      $ic$ram$rc
 EOF
 
 # Show terminal colors
-printf "\n%s\n%s\n\n" "$(pcs)" "$(pcs '1;')"
+printf "%s\n%s\n\n" "$(pcs)" "$(pcs bright)"
