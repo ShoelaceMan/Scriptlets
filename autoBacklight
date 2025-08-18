@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# -------------------- Tunables --------------------
+ALS_PATH_DEFAULT="/sys/bus/iio/devices/iio:device0/in_illuminance_raw"
+
+# Your sensor seems ~50..300 in normal use
+SENSOR_MIN=40
+SENSOR_MAX=300
+
+MIN_PERCENT=12
+MAX_PERCENT=100
+
+# Smoothing & stability
+ALPHA=0.15            # EMA factor (lower = smoother)
+RAW_HYST=25           # ignore ALS changes smaller than this (sensor units)
+CONSECUTIVE=4         # require N consecutive polls past hysteresis (~6s at 1.5s polls)
+
+# Asymmetric response: brighten faster, dim slower
+K_UP_PER_RAW=0.10     # % per raw unit when environment brightens
+K_DOWN_PER_RAW=0.05   # % per raw unit when environment darkens
+MIN_STEP=1
+MAX_STEP_UP=8
+MAX_STEP_DOWN=4
+
+# Extra guard against transient shadows (big sudden drop)
+SPIKE_DROP=40         # if ALS falls by >= this since last poll, ignore once
+
+# Respect manual brightness changes
+MANUAL_TOL=5          # treat as manual if % jump ≥ this
+MANUAL_COOLDOWN=6     # pause loops after manual change
+MANUAL_GUARD_SEC=5    # don't call it "manual" if we changed brightness within this window
+
+# Animation feel
+TIME_MS=500
+STEPS=60
+LOOP_DELAY=1.5        # seconds
+
+# Backlight controller (run `xbacklight -list`; intel_backlight is common)
+CTRL="intel_backlight"   # "" to auto-pick
+
+# -------------------- Helpers --------------------
+die(){ echo "error: $*" >&2; exit 1; }
+
+find_als(){
+  for d in /sys/bus/iio/devices/iio:device*; do
+    [ -r "$d/in_illuminance_raw" ] && { echo "$d/in_illuminance_raw"; return; }
+  done
+  [ -r "$ALS_PATH_DEFAULT" ] && { echo "$ALS_PATH_DEFAULT"; return; }
+  die "No readable ALS (in_illuminance_raw) found."
+}
+
+read_sensor(){ cat "$ALS_PATH"; }
+xback(){ if [ -n "$CTRL" ]; then xbacklight -ctrl "$CTRL" "$@"; else xbacklight "$@"; fi; }
+
+get_current_pct(){
+  local sys="/sys/class/backlight/${CTRL}/brightness"
+  local sysmax="/sys/class/backlight/${CTRL}/max_brightness"
+  if [ -n "$CTRL" ] && [ -r "$sys" ] && [ -r "$sysmax" ]; then
+    awk -v cur="$(cat "$sys")" -v mx="$(cat "$sysmax")" 'BEGIN{printf "%.0f",(cur*100.0/mx)}'
+  else
+    xback -get 2>/dev/null | awk '{printf "%.0f",$1}'
+  fi
+}
+
+abs(){ local v="$1"; (( v<0 )) && v=$(( -v )); echo "$v"; }
+clamp_pct(){ awk -v v="$1" -v lo="$MIN_PERCENT" -v hi="$MAX_PERCENT" 'BEGIN{ if(v<lo)v=lo; if(v>hi)v=hi; printf "%.0f", v }'; }
+now_s(){ date +%s; }
+
+# -------------------- Main --------------------
+command -v xbacklight >/dev/null || die "xbacklight/acpilight not found"
+ALS_PATH=$(find_als)
+
+echo "ALS: $ALS_PATH | EMA α=${ALPHA}, hyst=${RAW_HYST}, dwell=${CONSECUTIVE}, guard=${MANUAL_GUARD_SEC}s"
+echo "Asym: up k=${K_UP_PER_RAW}, max=${MAX_STEP_UP}% | down k=${K_DOWN_PER_RAW}, max=${MAX_STEP_DOWN}%"
+echo "Anim: ${TIME_MS}ms/${STEPS} steps; poll=${LOOP_DELAY}s; ctrl=${CTRL:-auto}"
+echo
+
+raw=$(read_sensor); prev_raw="$raw"; f_sensor="$raw"
+baseline="$f_sensor"                          # reference ALS that matches current brightness
+last_cmd_pct=$(get_current_pct); [ -z "${last_cmd_pct}" ] && last_cmd_pct=$MIN_PERCENT
+cooldown=0; consec=0; last_cmd_ts=0
+
+while :; do
+  raw=$(read_sensor)
+  # EMA filter
+  f_sensor=$(awk -v a="$ALPHA" -v x="$raw" -v prev="$f_sensor" 'BEGIN{printf "%.3f", a*x + (1-a)*prev}')
+
+  cur_pct=$(get_current_pct)
+  [ -z "$cur_pct" ] && cur_pct=$last_cmd_pct
+
+  # If we recently issued a command, don't mistake our own fade for manual
+  now=$(now_s)
+  recent=$(( now - last_cmd_ts ))
+
+  # Detect manual brightness changes only if outside guard window
+  diff_manual=$(( cur_pct - last_cmd_pct ))
+  if (( cooldown == 0 )) && (( ${diff_manual#-} >= MANUAL_TOL )) && (( recent > MANUAL_GUARD_SEC )); then
+    echo "Manual change: ${last_cmd_pct}% -> ${cur_pct}% ; pausing ${MANUAL_COOLDOWN} loops"
+    last_cmd_pct=$cur_pct
+    baseline="$f_sensor"    # align to user's preference
+    cooldown=$MANUAL_COOLDOWN
+  fi
+
+  if (( cooldown > 0 )); then
+    cooldown=$((cooldown-1))
+    prev_raw="$raw"
+    sleep "$LOOP_DELAY"
+    continue
+  fi
+
+  # Compute deviation from baseline
+  dev=$(awk -v s="$f_sensor" -v b="$baseline" 'BEGIN{printf "%.3f", s-b}')
+  # Transient shadow guard: ignore a single big downward spike
+  drop=$(( prev_raw - raw ))
+  prev_raw="$raw"
+  if (( drop >= SPIKE_DROP )); then
+    # Big sudden darkening; ignore this sample once
+    sleep "$LOOP_DELAY"
+    continue
+  fi
+
+  # Only consider meaningful changes
+  if awk -v d="$dev" -v h="$RAW_HYST" 'BEGIN{exit !( (d>=h) || (d<=-h) ) }'; then
+    consec=$((consec+1))
+  else
+    consec=0
+  fi
+
+  if (( consec >= CONSECUTIVE )); then
+    # Map deviation to a relative step, with asymmetric gains
+    if awk -v d="$dev" 'BEGIN{exit !(d>0)}'; then
+      # Brighter environment → increase brightness
+      step=$(awk -v d="$dev" -v k="$K_UP_PER_RAW" -v max="$MAX_STEP_UP" '
+        function abs(x){return x<0?-x:x}
+        BEGIN{ s=d*k; if (s<1) s=1; if (s>max) s=max; printf "%.0f", s }')
+    else
+      # Darker environment → decrease brightness (slower)
+      step=$(awk -v d="$dev" -v k="$K_DOWN_PER_RAW" -v max="$MAX_STEP_DOWN" '
+        function abs(x){return x<0?-x:x}
+        BEGIN{ s=d*k; if (s>-1) s=-1; if (-s>max) s=-max; printf "%.0f", s }')
+    fi
+
+    # Respect rails
+    new_pct=$(clamp_pct $(( cur_pct + step )))
+    step=$(( new_pct - cur_pct ))
+    if (( step != 0 )); then
+      if (( step > 0 )); then
+        echo "ALS raw=${raw} (f=${f_sensor}) ↑ +${step}% → ${new_pct}%"
+        xback -perceived -time "$TIME_MS" -steps "$STEPS" -inc "$step" || true
+      else
+        echo "ALS raw=${raw} (f=${f_sensor}) ↓ ${step}% → ${new_pct}%"
+        xback -perceived -time "$TIME_MS" -steps "$STEPS" -dec "$((-step))" || true
+      fi
+      # Resample after the fade to keep in sync (prevents false 'manual' on next loop)
+      sleep "$(awk -v t="$TIME_MS" 'BEGIN{printf "%.3f", (t/1000.0)}')"
+      cur2=$(get_current_pct); [ -n "$cur2" ] && last_cmd_pct="$cur2" || last_cmd_pct="$new_pct"
+      last_cmd_ts=$(now_s)
+
+      # Recenter baseline gently toward current sensor so we don't keep pushing forever
+      baseline=$(awk -v b="$baseline" -v s="$f_sensor" 'BEGIN{printf "%.3f", b + 0.3*(s-b)}')
+    fi
+
+    consec=0
+  fi
+
+  sleep "$LOOP_DELAY"
+done
