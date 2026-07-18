@@ -1,202 +1,1717 @@
 #! /usr/bin/python
 #
 """
-DNS Benchmarking Script
+dnsbench: a completely unnecessary, single-file DNS benchmark cockpit.
 
-This script is designed to benchmark multiple DNS servers by performing DNS
-queries on randomly selected domains from a whitelist. The script fetches a
-list of domains from a specified URL, tests each DNS server by querying a
-random domain from the list, and calculates the average response time for each
-server.
+It still does exactly what the original script was meant to do: benchmark the
+hard-coded homelab DNS servers below. It just now does it with enough ceremony
+that it probably deserves a tiny clipboard and a change advisory.
 
-The script uses the following components:
-  - **fetch_whitelist(url, timeout=10):** Fetches a list of domains from the
-    specified URL with an optional timeout. The list is used for DNS query
-    testing.
+Core safety properties:
+  * Benchmark traffic is time-bound by default. Use --continuous to run forever.
+  * Every upstream must pass a health check before benchmark traffic is sent.
+  * Failed upstreams are quarantined and periodically rechecked with bounded
+    health probes instead of being hammered by benchmark retries.
+  * Ctrl+C/SIGTERM flips a shared stop event, cancels queued work, and waits a
+    bounded amount of time for in-flight DNS calls to unwind.
+  * No config file. No sidecar state. No daemon. No permanent DNS spam machine.
 
-  - **get_random_domain(domains_list):** Selects and returns a random domain
-    from the provided list, ensuring varied queries to avoid caching effects.
-
-  - **run_dns_test(nameserver, domain):** Performs a DNS query using the
-    specified nameserver for the given domain and returns the query time in
-    ms.  Handles exceptions for timeouts, NXDOMAIN, and other DNS errors.
-
-  - **test_nameserver(nameserver, domains_list, num_tests=10):** Tests a DNS
-    nameserver by performing a specified number of DNS queries on randomly
-    selected domains.  The function calculates and returns the average query
-    time across all tests.
-  - **main():** The entry point of the script. It fetches the whitelist, tests
-    all configured DNS servers in parallel, and prints the average query time
-    for each server.
-
-  Usage:
-  - The script can be run directly from the command line.
-  - The output consists of the DNS server name and average query time in ms.
-
-  Dependencies:
-  - `requests` for fetching the domain whitelist from a URL.
-  - `dnspython` for performing DNS queries.
-
-  Example:
-  dnsbench.py | sort -t: -k2,2n
+Dependencies: requests, dnspython. Everything else is standard library.
 """
 
-import random
+from __future__ import annotations
+
+import argparse
 import concurrent.futures
+import csv
+import dataclasses
+import enum
+import json
+import math
+import os
+import random
+import signal
 import statistics
+import sys
+import textwrap
+import threading
+import time
+from collections import Counter, deque
+from datetime import datetime, timezone
+from typing import Iterable, Sequence
+
+import dns.exception
 import dns.resolver
 import requests
 
-# Constants
-WHITELIST_URL_BASE = "https://raw.githubusercontent.com/anudeepND"
-WHITELIST_URL = f"{WHITELIST_URL_BASE}/whitelist/master/domains/whitelist.txt"
-NAMESERVERS = [
-    ("10.6.0.10", "AdguardHome 1"),
-    ("10.6.0.11", "AdguardHome 2"),
-    ("10.3.4.12", "AdguardHome 3"),
-    ("10.6.0.20", "Pihole 1     "),
-    ("10.6.0.21", "Pihole 2     "),
-    ("10.6.0.62", "Windows DNS 1"),
-    ("10.6.0.63", "Windows DNS 2"),
-    ("10.6.0.30", "Unbound 1    "),
-    ("10.6.0.31", "Unbound 2    "),
-    ("10.3.4.32", "Unbound 3    ")]
+# ---------------------------------------------------------------------------
+# The entire point of the script: benchmark THESE DNS servers.
+# ---------------------------------------------------------------------------
+
+WHITELIST_URL = "https://gist.githubusercontent.com/jgamblin/62fadd8aa321f7f6a482912a6a317ea3/raw/33c6752125188cfdacdeee3f4fd6e01909e50eef/urls.txt"
+
+NAMESERVERS: tuple[tuple[str, str], ...] = (
+    # Homelab resolver/routing surfaces. The Windows DCs that used to live at
+    # 10.22.0.70/71 were replaced by the FreeIPA pair below.
+    ("10.22.202.53", "Homelab dnsdist VIP"),
+    ("10.22.0.57", "PowerDNS recursor 1"),
+    ("10.22.0.58", "PowerDNS recursor 2"),
+
+    # Common public recursive resolvers for an outside-baseline sanity check.
+    ("1.1.1.1", "Cloudflare 1"),
+    ("1.0.0.1", "Cloudflare 2"),
+    ("8.8.8.8", "Google 1"),
+    ("8.8.4.4", "Google 2"),
+    ("9.9.9.9", "Quad9 1"),
+    ("149.112.112.112", "Quad9 2"),
+    ("208.67.222.222", "OpenDNS 1"),
+    ("208.67.220.220", "OpenDNS 2"),
+)
+
+FALLBACK_DOMAINS: tuple[str, ...] = (
+    "example.com",
+    "cloudflare.com",
+    "google.com",
+    "github.com",
+    "openai.com",
+    "wikipedia.org",
+    "iana.org",
+    "ietf.org",
+    "kernel.org",
+    "debian.org",
+    "python.org",
+    "ubuntu.com",
+    "archlinux.org",
+    "mozilla.org",
+    "akamai.com",
+    "fastly.com",
+    "quad9.net",
+    "one.one.one.one",
+)
+
+DEFAULT_HEALTHCHECK_QUERIES: tuple[tuple[str, str], ...] = (
+    ("example.com", "A"),
+    ("cloudflare.com", "A"),
+    ("iana.org", "A"),
+)
+
+SCRIPT_VERSION = "2026.07.17-overengineered-dns-roster"
+
+# ---------------------------------------------------------------------------
+# ANSI, typography, and terminal niceties. No third-party pretty-print library.
+# ---------------------------------------------------------------------------
+
+SPINNER_FRAMES_UNICODE = (
+    "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+)
+SPINNER_FRAMES_ASCII = ("|", "/", "-", "\\")
+SPARK_CHARS_UNICODE = "▁▂▃▄▅▆▇█"
+SPARK_CHARS_ASCII = ".:-=+*#@"
+SCANNER_FRAMES_UNICODE = (
+    "▰▱▱▱▱▱▱▱▱▱▱▱",
+    "▱▰▱▱▱▱▱▱▱▱▱▱",
+    "▱▱▰▱▱▱▱▱▱▱▱▱",
+    "▱▱▱▰▱▱▱▱▱▱▱▱",
+    "▱▱▱▱▰▱▱▱▱▱▱▱",
+    "▱▱▱▱▱▰▱▱▱▱▱▱",
+    "▱▱▱▱▱▱▰▱▱▱▱▱",
+    "▱▱▱▱▱▱▱▰▱▱▱▱",
+    "▱▱▱▱▱▱▱▱▰▱▱▱",
+    "▱▱▱▱▱▱▱▱▱▰▱▱",
+    "▱▱▱▱▱▱▱▱▱▱▰▱",
+    "▱▱▱▱▱▱▱▱▱▱▱▰",
+)
+SCANNER_FRAMES_ASCII = (
+    "#-----------",
+    "-#----------",
+    "--#---------",
+    "---#--------",
+    "----#-------",
+    "-----#------",
+    "------#-----",
+    "-------#----",
+    "--------#---",
+    "---------#--",
+    "----------#-",
+    "-----------#",
+)
 
 
-# Fetch the whitelist domains
-def fetch_whitelist(url, timeout=10):
-    """
-    Fetches a list of domains from a specified URL and returns them as a list
-    of strings.
-
-    The function sends an HTTP GET request to the provided URL, retrieves the
-    content, and splits it into individual lines. Each line represents a domain
-    name that can be used for DNS query testing.
-
-    Parameters:
-        url (str): The URL from which to fetch the domain whitelist.
-
-        Returns:
-        list: A list of domain names from the URL, each as a separate string.
-
-        Raises:
-        requests.exceptions.RequestException: If there is an issue with the
-        HTTP request, such as network problems or a non-successful HTTP status
-        code.
-    """
-    response = requests.get(url, timeout=timeout)
-    response.raise_for_status()
-    return response.text.splitlines()
+class Ansi:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    GREY = "\033[90m"
+    CLEAR = "\033[2J\033[H"
+    HIDE_CURSOR = "\033[?25l"
+    SHOW_CURSOR = "\033[?25h"
 
 
-# Function to get a random domain from the whitelist
-def get_random_domain(domains_list):
-    """
-    Selects and returns a random domain from the provided list of domains.
-
-    This function is used to randomly choose a domain name for DNS query
-    testing. The randomness helps in avoiding caching effects and ensures that
-    different domains are tested across different DNS servers.
-
-    Parameters:
-    domains_list (list): A list of domain names to choose from.
-
-    Returns:
-    str: A randomly selected domain name from the list.
-    """
-    return random.choice(domains_list)
+class ColorMode(enum.Enum):
+    AUTO = "auto"
+    ALWAYS = "always"
+    NEVER = "never"
 
 
-# Function to run a DNS query and return the query time
-def run_dns_test(nameserver, domain):
-    """
-    Performs a DNS query for a given domain using a specified DNS nameserver
-    and returns the time taken to receive a response.
+class UIMode(enum.Enum):
+    AUTO = "auto"
+    LIVE = "live"
+    PLAIN = "plain"
+    QUIET = "quiet"
 
-    The function configures a DNS resolver to use the specified nameserver,
-    then executes a DNS query for the given domain. If the query is successful,
-    the time taken for the response is returned in milliseconds. If the query
-    fails due to a timeout, non-existent domain, or other DNS errors, the
-    function returns None.
 
-    Parameters:
-        nameserver (str): The IP address of the DNS server to query.
-        domain (str): The domain name to query.
+class OutputFormat(enum.Enum):
+    TEXT = "text"
+    JSON = "json"
+    CSV = "csv"
 
-    Returns:
-        float or None: The time taken on the query in ms, or None if failed.
-    """
-    resolver = dns.resolver.Resolver()
-    resolver.nameservers = [nameserver]
+
+class Phase(enum.Enum):
+    QUEUED = "queued"
+    CHECKING = "checking"
+    ONLINE = "online"
+    WARMING = "warming"
+    TESTING = "testing"
+    QUARANTINED = "quarantined"
+    STOPPING = "stopping"
+    DONE = "done"
+
+
+class Verdict(enum.Enum):
+    UNKNOWN = "unknown"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNAVAILABLE = "unavailable"
+    STOPPED = "stopped"
+
+
+def env_truthy(name: str) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def stdout_is_tty() -> bool:
+    return bool(getattr(sys.stdout, "isatty", lambda: False)())
+
+
+def stderr_is_tty() -> bool:
+    return bool(getattr(sys.stderr, "isatty", lambda: False)())
+
+
+def supports_unicode() -> bool:
+    encoding = (sys.stdout.encoding or sys.getdefaultencoding() or "").lower()
+    term = os.environ.get("TERM", "")
+    return "utf" in encoding and term != "dumb"
+
+
+def should_use_color(mode: ColorMode, stream) -> bool:
+    if mode is ColorMode.ALWAYS:
+        return True
+    if mode is ColorMode.NEVER:
+        return False
+    if env_truthy("NO_COLOR"):
+        return False
+    return bool(getattr(stream, "isatty", lambda: False)()) and os.environ.get("TERM") != "dumb"
+
+
+def paint(text: str, color: str, enabled: bool, *, bold: bool = False, dim: bool = False) -> str:
+    if not enabled:
+        return text
+    prefix = ""
+    if bold:
+        prefix += Ansi.BOLD
+    if dim:
+        prefix += Ansi.DIM
+    prefix += color
+    return f"{prefix}{text}{Ansi.RESET}"
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def monotonic() -> float:
+    return time.monotonic()
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def human_duration(seconds: float | None) -> str:
+    if seconds is None or math.isinf(seconds):
+        return "∞"
+    seconds = max(0.0, float(seconds))
+    if seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    minutes, sec = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours:d}h{minutes:02d}m{sec:02d}s"
+    if minutes:
+        return f"{minutes:d}m{sec:02d}s"
+    return f"{sec:d}s"
+
+
+def format_ms(value: float | None, width: int = 8) -> str:
+    if value is None or math.isnan(value):
+        return "-".rjust(width)
+    if value >= 10000:
+        return f"{value / 1000:.2f}s".rjust(width)
+    if value >= 1000:
+        return f"{value / 1000:.3f}s".rjust(width)
+    if value >= 100:
+        return f"{value:.1f}".rjust(width)
+    return f"{value:.2f}".rjust(width)
+
+
+def format_rate(value: float | None) -> str:
+    if value is None or value <= 0:
+        return "-"
+    if value >= 100:
+        return f"{value:.0f}/s"
+    if value >= 10:
+        return f"{value:.1f}/s"
+    return f"{value:.2f}/s"
+
+
+def ellipsize(text: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return "…" if supports_unicode() else "."
+    return text[: width - 1] + ("…" if supports_unicode() else ".")
+
+
+def percentile(values: Sequence[float], pct: float) -> float | None:
+    if not values:
+        return None
+    if len(values) == 1:
+        return float(values[0])
+    ordered = sorted(values)
+    rank = (len(ordered) - 1) * pct
+    lower = math.floor(rank)
+    upper = math.ceil(rank)
+    if lower == upper:
+        return float(ordered[int(rank)])
+    low_value = ordered[lower]
+    high_value = ordered[upper]
+    return float(low_value + (high_value - low_value) * (rank - lower))
+
+
+def sparkline(values: Sequence[float], width: int, *, unicode: bool) -> str:
+    chars = SPARK_CHARS_UNICODE if unicode else SPARK_CHARS_ASCII
+    if width <= 0:
+        return ""
+    if not values:
+        return "·" * width if unicode else "." * width
+    data = list(values)[-width:]
+    if len(data) < width:
+        pad = ("·" if unicode else ".") * (width - len(data))
+    else:
+        pad = ""
+    lo = min(data)
+    hi = max(data)
+    if math.isclose(lo, hi):
+        body = chars[len(chars) // 2] * len(data)
+    else:
+        span = hi - lo
+        body = "".join(chars[int(clamp((v - lo) / span, 0, 0.999999) * len(chars))] for v in data)
+    return pad + body
+
+
+def progress_bar(fraction: float, width: int, *, unicode: bool) -> str:
+    fraction = clamp(fraction, 0.0, 1.0)
+    filled = int(round(width * fraction))
+    if unicode:
+        return "█" * filled + "░" * (width - filled)
+    return "#" * filled + "-" * (width - filled)
+
+
+def normalize_domain(line: str) -> str | None:
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    # Handle common hosts-file and adblock-list shapes without trying to be a
+    # full parser. The whitelist this script uses is already simple, but this
+    # lets the fallback path survive harmless format drift.
+    if "#" in line:
+        line = line.split("#", 1)[0].strip()
+    parts = line.split()
+    if not parts:
+        return None
+    if parts[0] in {"0.0.0.0", "127.0.0.1", "::1"} and len(parts) > 1:
+        line = parts[1]
+    else:
+        line = parts[0]
+    line = line.strip(". ").lower()
+    if not line or "/" in line or "*" in line:
+        return None
+    if "." not in line:
+        return None
+    return line
+
+
+def unique_stable(items: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Runtime stop state and signal handling.
+# ---------------------------------------------------------------------------
+
+STOP_EVENT = threading.Event()
+_SHUTDOWN_LOCK = threading.Lock()
+_SHUTDOWN_SIGNUM: int | None = None
+_SHUTDOWN_REASON = "completed"
+
+
+def signal_exit_code() -> int:
+    with _SHUTDOWN_LOCK:
+        if _SHUTDOWN_SIGNUM is None:
+            return 130
+        return 128 + _SHUTDOWN_SIGNUM
+
+
+def shutdown_reason() -> str:
+    with _SHUTDOWN_LOCK:
+        return _SHUTDOWN_REASON
+
+
+def request_shutdown(reason: str, signum: int | None = None) -> None:
+    global _SHUTDOWN_SIGNUM, _SHUTDOWN_REASON
+    with _SHUTDOWN_LOCK:
+        if signum is not None and _SHUTDOWN_SIGNUM is None:
+            _SHUTDOWN_SIGNUM = signum
+        if _SHUTDOWN_REASON == "completed" or signum is not None:
+            _SHUTDOWN_REASON = reason
+    STOP_EVENT.set()
+
+
+def _handle_shutdown_signal(signum: int, _frame) -> None:
     try:
-        # Time the DNS query
-        response = resolver.resolve(domain, 'A', lifetime=2.0)
-        # If successful, return the response time in milliseconds
-        return response.response.time * 1000
-    except (dns.resolver.Timeout,
-            dns.resolver.NXDOMAIN,
-            dns.resolver.NoNameservers,
-            dns.resolver.YXDOMAIN) as e:
-        raise Exception(
-            f"The DNS response does not contain an answer to the question: "
-            f"{domain}. IN A"
-        ) from e
+        sig_name = signal.Signals(signum).name
+    except ValueError:
+        sig_name = f"signal {signum}"
+    request_shutdown(sig_name, signum)
+    # Raising KeyboardInterrupt wakes the main thread out of sleeps/waits.
+    raise KeyboardInterrupt
 
 
-# Function to test a nameserver and return the average response time
-def test_nameserver(nameserver, domains_list, num_tests=10):
-    """
-    Tests a given DNS nameserver by performing DNS queries on a specified
-    number of random domains. The function queries a random domain from the
-    provided list, measures the query time, and repeats the process for a
-    specified number of tests. If a DNS query fails, the function retries with
-    a different random domain. Finally, the function calculates and returns the
-    average query time across all tests.
-
-    Parameters:
-        nameserver (tuple): A tuple containing the IP and name of the server.
-        domains_list (list): A list of domains to select from for DNS queries.
-        num_tests (int): The number of tests to perform on the nameserver.
-
-    Returns:
-        float: The average DNS query time in milliseconds for the nameserver.
-    """
-    times = []
-    for _ in range(num_tests):
-        while True:
-            domain = get_random_domain(domains_list)
-            try:
-                query_time = run_dns_test(nameserver[0], domain)
-                if query_time is not None:
-                    times.append(query_time)
-                    break  # Successful query, move to the next test
-            except Exception:
-                continue  # Retry with another domain
-
-    avg_time = statistics.mean(times) if times else 0
-    print(f"{nameserver[1]} ({nameserver[0]}) | Average: {avg_time:.2f} ms\n",
-          end="")
+def install_signal_handlers() -> None:
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
 
 
-def main():
-    """
-    Fetches a list of domains from a whitelist, tests multiple DNS servers by
-    querying random domains from the list, and prints the average query time
-    for each server. The DNS queries are performed in parallel for efficiency.
-    """
-    domains_list = fetch_whitelist(WHITELIST_URL)
+def sleep_cooperatively(seconds: float, deadline: float | None = None) -> None:
+    end = monotonic() + max(0.0, seconds)
+    while not STOP_EVENT.is_set():
+        now = monotonic()
+        if deadline is not None and now >= deadline:
+            return
+        remaining = end - now
+        if remaining <= 0:
+            return
+        if deadline is not None:
+            remaining = min(remaining, max(0.0, deadline - now))
+        time.sleep(min(remaining, 0.1))
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = {executor.submit(test_nameserver, ns, domains_list): ns
-                   for ns in NAMESERVERS}
 
-        for future in concurrent.futures.as_completed(futures):
-            ns = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Exception occurred during testing of {ns[1]}: {e}")
+# ---------------------------------------------------------------------------
+# Data model: aggressively explicit for a five-server script.
+# ---------------------------------------------------------------------------
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class NameServer:
+    address: str
+    label: str
+
+    @classmethod
+    def all(cls) -> tuple["NameServer", ...]:
+        return tuple(cls(address=address, label=label.rstrip()) for address, label in NAMESERVERS)
+
+    @property
+    def display(self) -> str:
+        return f"{self.label} ({self.address})"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QueryOutcome:
+    ok: bool
+    latency_ms: float | None
+    domain: str
+    rdtype: str
+    error_kind: str | None = None
+    detail: str | None = None
+    answer_count: int | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class BenchmarkSettings:
+    duration: float | None
+    continuous: bool
+    interval: float
+    jitter: float
+    query_timeout: float
+    query_lifetime: float
+    health_timeout: float
+    health_lifetime: float
+    health_retries: int
+    recheck_interval: float
+    failure_quarantine_threshold: int
+    warmup_queries: int
+    record_type: str
+    tcp: bool
+    refresh_interval: float
+    snapshot_interval: float
+    window_size: int
+    spark_width: int
+    seed: int | None
+    fetch_timeout: float
+    whitelist_url: str
+    output_format: OutputFormat
+    ui_mode: UIMode
+    color_mode: ColorMode
+    force_unicode: bool | None
+    strict_whitelist: bool
+
+    @property
+    def deadline(self) -> float | None:
+        if self.continuous or self.duration is None:
+            return None
+        return monotonic() + self.duration
+
+    @property
+    def transport(self) -> str:
+        return "tcp" if self.tcp else "udp"
+
+
+class OnlineLatencyStats:
+    """Online average/variance plus a bounded percentile/sparkline window."""
+
+    def __init__(self, window_size: int, spark_width: int, ewma_alpha: float = 0.20):
+        self.n = 0
+        self.mean = 0.0
+        self.m2 = 0.0
+        self.min_value: float | None = None
+        self.max_value: float | None = None
+        self.ewma: float | None = None
+        self.window: deque[float] = deque(maxlen=max(2, window_size))
+        self.spark_values: deque[float] = deque(maxlen=max(2, spark_width))
+        self.ewma_alpha = clamp(ewma_alpha, 0.01, 1.0)
+
+    def add(self, value: float) -> None:
+        self.n += 1
+        delta = value - self.mean
+        self.mean += delta / self.n
+        delta2 = value - self.mean
+        self.m2 += delta * delta2
+        self.min_value = value if self.min_value is None else min(self.min_value, value)
+        self.max_value = value if self.max_value is None else max(self.max_value, value)
+        self.ewma = value if self.ewma is None else (self.ewma_alpha * value + (1 - self.ewma_alpha) * self.ewma)
+        self.window.append(value)
+        self.spark_values.append(value)
+
+    @property
+    def variance(self) -> float | None:
+        if self.n < 2:
+            return None
+        return self.m2 / (self.n - 1)
+
+    @property
+    def stdev(self) -> float | None:
+        variance = self.variance
+        return math.sqrt(variance) if variance is not None else None
+
+    def snapshot(self) -> dict[str, object]:
+        win = list(self.window)
+        return {
+            "samples": self.n,
+            "avg_ms": self.mean if self.n else None,
+            "ewma_ms": self.ewma,
+            "stdev_ms": self.stdev,
+            "min_ms": self.min_value,
+            "max_ms": self.max_value,
+            "window_avg_ms": statistics.mean(win) if win else None,
+            "p50_ms": percentile(win, 0.50),
+            "p90_ms": percentile(win, 0.90),
+            "p95_ms": percentile(win, 0.95),
+            "p99_ms": percentile(win, 0.99),
+            "spark_values": tuple(self.spark_values),
+        }
+
+
+class ServerState:
+    """Thread-safe, over-narrated state for one upstream."""
+
+    def __init__(self, server: NameServer, *, window_size: int, spark_width: int):
+        self.server = server
+        self._lock = threading.RLock()
+        self._stats = OnlineLatencyStats(window_size=window_size, spark_width=spark_width)
+        self.created_at = monotonic()
+        self.started_at: float | None = None
+        self.last_activity_at: float | None = None
+        self.last_success_at: float | None = None
+        self.last_failure_at: float | None = None
+        self.last_health_at: float | None = None
+        self.next_health_at: float | None = None
+        self.phase = Phase.QUEUED
+        self.verdict = Verdict.UNKNOWN
+        self.health_ok: bool | None = None
+        self.health_checks = 0
+        self.health_failures = 0
+        self.health_successes = 0
+        self.benchmark_failures = 0
+        self.warmup_successes = 0
+        self.warmup_failures = 0
+        self.consecutive_failures = 0
+        self.total_benchmark_attempts = 0
+        self.last_latency_ms: float | None = None
+        self.last_domain: str | None = None
+        self.last_rdtype: str | None = None
+        self.last_error: str | None = None
+        self.last_detail: str | None = None
+        self.error_counts: Counter[str] = Counter()
+        self.recoveries = 0
+        self.quarantines = 0
+
+    def set_phase(self, phase: Phase, verdict: Verdict | None = None, detail: str | None = None) -> None:
+        with self._lock:
+            self.phase = phase
+            if verdict is not None:
+                self.verdict = verdict
+            if detail is not None:
+                self.last_detail = detail
+            self.last_activity_at = monotonic()
+
+    def mark_health_success(self, outcome: QueryOutcome) -> None:
+        with self._lock:
+            was_down = self.health_ok is False
+            self.health_checks += 1
+            self.health_successes += 1
+            self.health_ok = True
+            self.phase = Phase.ONLINE
+            self.verdict = Verdict.HEALTHY
+            self.last_health_at = monotonic()
+            self.next_health_at = None
+            self.last_activity_at = self.last_health_at
+            self.last_latency_ms = outcome.latency_ms
+            self.last_domain = outcome.domain
+            self.last_rdtype = outcome.rdtype
+            self.last_error = None
+            self.last_detail = f"health ok: {outcome.domain} {outcome.rdtype}"
+            self.consecutive_failures = 0
+            if was_down:
+                self.recoveries += 1
+
+    def mark_health_failure(self, outcome: QueryOutcome, next_health_at: float) -> None:
+        with self._lock:
+            self.health_checks += 1
+            self.health_failures += 1
+            self.health_ok = False
+            self.phase = Phase.QUARANTINED
+            self.verdict = Verdict.UNAVAILABLE
+            self.last_health_at = monotonic()
+            self.next_health_at = next_health_at
+            self.last_activity_at = self.last_health_at
+            self.last_domain = outcome.domain
+            self.last_rdtype = outcome.rdtype
+            self.last_error = outcome.error_kind or "health-failed"
+            self.last_detail = outcome.detail or "health check failed"
+            self.error_counts[self.last_error] += 1
+
+    def mark_warmup(self, outcome: QueryOutcome) -> None:
+        with self._lock:
+            self.phase = Phase.WARMING
+            self.last_activity_at = monotonic()
+            self.last_domain = outcome.domain
+            self.last_rdtype = outcome.rdtype
+            self.last_latency_ms = outcome.latency_ms
+            if outcome.ok:
+                self.warmup_successes += 1
+                self.consecutive_failures = 0
+                self.last_error = None
+                self.last_detail = "warmup ok"
+            else:
+                self.warmup_failures += 1
+                self.consecutive_failures += 1
+                self.last_error = outcome.error_kind or "warmup-failed"
+                self.last_detail = outcome.detail or "warmup failed"
+                self.error_counts[self.last_error] += 1
+
+    def mark_benchmark_success(self, outcome: QueryOutcome) -> None:
+        with self._lock:
+            now = monotonic()
+            if self.started_at is None:
+                self.started_at = now
+            self.total_benchmark_attempts += 1
+            self._stats.add(float(outcome.latency_ms or 0.0))
+            self.phase = Phase.TESTING
+            self.verdict = Verdict.HEALTHY
+            self.health_ok = True
+            self.last_activity_at = now
+            self.last_success_at = now
+            self.last_latency_ms = outcome.latency_ms
+            self.last_domain = outcome.domain
+            self.last_rdtype = outcome.rdtype
+            self.last_error = None
+            self.last_detail = f"{outcome.answer_count or 0} answer(s)"
+            self.consecutive_failures = 0
+
+    def mark_benchmark_failure(self, outcome: QueryOutcome, *, threshold: int, next_health_at: float) -> None:
+        with self._lock:
+            now = monotonic()
+            if self.started_at is None:
+                self.started_at = now
+            self.total_benchmark_attempts += 1
+            self.benchmark_failures += 1
+            self.consecutive_failures += 1
+            self.last_activity_at = now
+            self.last_failure_at = now
+            self.last_domain = outcome.domain
+            self.last_rdtype = outcome.rdtype
+            self.last_error = outcome.error_kind or "query-failed"
+            self.last_detail = outcome.detail or "benchmark query failed"
+            self.error_counts[self.last_error] += 1
+            if self.consecutive_failures >= threshold:
+                self.health_ok = False
+                self.phase = Phase.QUARANTINED
+                self.verdict = Verdict.UNAVAILABLE
+                self.next_health_at = next_health_at
+                self.quarantines += 1
+            else:
+                self.phase = Phase.TESTING
+                self.verdict = Verdict.DEGRADED
+
+    def mark_stopping(self) -> None:
+        with self._lock:
+            self.phase = Phase.STOPPING
+            self.last_activity_at = monotonic()
+
+    def mark_done(self) -> None:
+        with self._lock:
+            # DONE is a phase, not a health verdict. Preserve the last useful
+            # resolver verdict so final summaries answer the question the user
+            # actually cares about: healthy/degraded/unavailable.
+            if self.verdict is Verdict.UNKNOWN and STOP_EVENT.is_set():
+                self.verdict = Verdict.STOPPED
+            self.phase = Phase.DONE
+            self.last_activity_at = monotonic()
+
+    def snapshot(self) -> dict[str, object]:
+        with self._lock:
+            stats = self._stats.snapshot()
+            now = monotonic()
+            elapsed = None
+            if self.started_at is not None:
+                elapsed = max(0.0, now - self.started_at)
+            attempts = self.total_benchmark_attempts
+            samples = int(stats["samples"])
+            fail_pct = (self.benchmark_failures / attempts * 100.0) if attempts else None
+            qps = (attempts / elapsed) if elapsed and elapsed > 0 else None
+            return {
+                "server": dataclasses.asdict(self.server),
+                "display": self.server.display,
+                "phase": self.phase.value,
+                "verdict": self.verdict.value,
+                "health_ok": self.health_ok,
+                "health_checks": self.health_checks,
+                "health_successes": self.health_successes,
+                "health_failures": self.health_failures,
+                "benchmark_attempts": attempts,
+                "benchmark_failures": self.benchmark_failures,
+                "failure_percent": fail_pct,
+                "consecutive_failures": self.consecutive_failures,
+                "warmup_successes": self.warmup_successes,
+                "warmup_failures": self.warmup_failures,
+                "recoveries": self.recoveries,
+                "quarantines": self.quarantines,
+                "last_latency_ms": self.last_latency_ms,
+                "last_domain": self.last_domain,
+                "last_rdtype": self.last_rdtype,
+                "last_error": self.last_error,
+                "last_detail": self.last_detail,
+                "next_health_in_s": max(0.0, self.next_health_at - now) if self.next_health_at else None,
+                "qps": qps,
+                "error_counts": dict(self.error_counts),
+                **stats,
+            }
+
+
+# ---------------------------------------------------------------------------
+# Domain source and DNS client.
+# ---------------------------------------------------------------------------
+
+class DomainDeck:
+    """Thread-safe weighted-random-ish draw pile for benchmark domains."""
+
+    def __init__(self, domains: Sequence[str], seed: int | None):
+        if not domains:
+            raise ValueError("Domain list is empty")
+        self._domains = list(domains)
+        self._random = random.Random(seed)
+        self._lock = threading.Lock()
+        self._deck: list[str] = []
+        self._refills = 0
+
+    @property
+    def size(self) -> int:
+        return len(self._domains)
+
+    @property
+    def refills(self) -> int:
+        with self._lock:
+            return self._refills
+
+    def draw(self) -> str:
+        with self._lock:
+            if not self._deck:
+                self._deck = list(self._domains)
+                self._random.shuffle(self._deck)
+                self._refills += 1
+            return self._deck.pop()
+
+
+def fetch_domains(settings: BenchmarkSettings) -> tuple[list[str], str]:
+    """Fetch and normalize the whitelist; optionally fall back to built-ins."""
+    try:
+        response = requests.get(settings.whitelist_url, timeout=settings.fetch_timeout)
+        response.raise_for_status()
+        raw_domains = [normalize_domain(line) for line in response.text.splitlines()]
+        domains = unique_stable(d for d in raw_domains if d)
+        if not domains:
+            raise ValueError("whitelist fetched successfully but contained no usable domains")
+        return domains, settings.whitelist_url
+    except Exception as exc:  # noqa: BLE001 - fallback path is intentionally broad
+        if settings.strict_whitelist:
+            raise RuntimeError(f"Unable to fetch whitelist from {settings.whitelist_url}: {exc}") from exc
+        domains = unique_stable(d for d in FALLBACK_DOMAINS if normalize_domain(d))
+        print(
+            f"Whitelist fetch failed ({exc!r}); using {len(domains)} built-in fallback domains.",
+            file=sys.stderr,
+        )
+        return domains, "built-in fallback"
+
+
+class DNSClient:
+    def __init__(self, settings: BenchmarkSettings):
+        self.settings = settings
+
+    def query(
+        self,
+        server: NameServer,
+        domain: str,
+        *,
+        rdtype: str | None = None,
+        timeout: float | None = None,
+        lifetime: float | None = None,
+    ) -> QueryOutcome:
+        rdtype = (rdtype or self.settings.record_type).upper()
+        timeout = self.settings.query_timeout if timeout is None else timeout
+        lifetime = self.settings.query_lifetime if lifetime is None else lifetime
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = [server.address]
+        resolver.timeout = timeout
+        resolver.lifetime = lifetime
+        resolver.retry_servfail = False
+        start = monotonic()
+        try:
+            answer = resolver.resolve(domain, rdtype, tcp=self.settings.tcp)
+            latency_ms = (monotonic() - start) * 1000.0
+            answer_count = len(answer) if answer is not None else 0
+            return QueryOutcome(
+                ok=True,
+                latency_ms=latency_ms,
+                domain=domain,
+                rdtype=rdtype,
+                answer_count=answer_count,
+            )
+        except dns.resolver.Timeout as exc:
+            return QueryOutcome(False, None, domain, rdtype, "timeout", str(exc))
+        except dns.resolver.NXDOMAIN as exc:
+            return QueryOutcome(False, None, domain, rdtype, "nxdomain", str(exc))
+        except dns.resolver.NoAnswer as exc:
+            return QueryOutcome(False, None, domain, rdtype, "no-answer", str(exc))
+        except dns.resolver.NoNameservers as exc:
+            return QueryOutcome(False, None, domain, rdtype, "no-nameservers", str(exc))
+        except dns.resolver.YXDOMAIN as exc:
+            return QueryOutcome(False, None, domain, rdtype, "yxdomain", str(exc))
+        except dns.exception.DNSException as exc:
+            return QueryOutcome(False, None, domain, rdtype, exc.__class__.__name__, str(exc))
+        except OSError as exc:
+            return QueryOutcome(False, None, domain, rdtype, exc.__class__.__name__, str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Worker logic: health gate, quarantine, paced benchmark loop.
+# ---------------------------------------------------------------------------
+
+def should_continue(deadline: float | None) -> bool:
+    if STOP_EVENT.is_set():
+        return False
+    if deadline is not None and monotonic() >= deadline:
+        return False
+    return True
+
+
+def jittered_interval(base: float, jitter: float, rng: random.Random) -> float:
+    if base <= 0:
+        return 0.0
+    jitter = clamp(jitter, 0.0, 1.0)
+    if jitter == 0:
+        return base
+    return max(0.0, base * (1.0 + rng.uniform(-jitter, jitter)))
+
+
+def run_health_check(
+    server: NameServer,
+    state: ServerState,
+    client: DNSClient,
+    settings: BenchmarkSettings,
+    health_queries: Sequence[tuple[str, str]],
+    deadline: float | None,
+) -> bool:
+    last_outcome = QueryOutcome(False, None, "-", settings.record_type, "not-run", "health check did not run")
+    attempted = False
+    exhausted = False
+    for attempt in range(max(1, settings.health_retries)):
+        if STOP_EVENT.is_set():
+            if attempted:
+                break
+            return False
+        if deadline is not None and monotonic() >= deadline:
+            break
+        for domain, rdtype in health_queries:
+            if STOP_EVENT.is_set():
+                break
+            if deadline is not None and monotonic() >= deadline:
+                break
+            outcome = client.query(
+                server,
+                domain,
+                rdtype=rdtype,
+                timeout=settings.health_timeout,
+                lifetime=settings.health_lifetime,
+            )
+            attempted = True
+            last_outcome = outcome
+            if outcome.ok:
+                state.mark_health_success(outcome)
+                return True
+        else:
+            if attempt + 1 < settings.health_retries:
+                sleep_cooperatively(min(0.25, settings.health_lifetime / 4), deadline)
+                continue
+            exhausted = True
+        break
+
+    if attempted or exhausted:
+        next_health_at = monotonic() + settings.recheck_interval
+        state.mark_health_failure(last_outcome, next_health_at)
+    return False
+
+
+def server_worker(
+    server: NameServer,
+    state: ServerState,
+    deck: DomainDeck,
+    client: DNSClient,
+    settings: BenchmarkSettings,
+    health_queries: Sequence[tuple[str, str]],
+    deadline: float | None,
+) -> None:
+    rng_seed = (settings.seed if settings.seed is not None else time.monotonic_ns()) ^ hash(server.address)
+    rng = random.Random(rng_seed)
+    warmup_remaining = max(0, settings.warmup_queries)
+
+    try:
+        state.set_phase(Phase.CHECKING, Verdict.UNKNOWN, "initial health gate")
+        while should_continue(deadline):
+            snapshot = state.snapshot()
+            health_ok = snapshot["health_ok"] is True
+
+            if not health_ok:
+                state.set_phase(Phase.CHECKING, Verdict.UNKNOWN, "probing upstream availability")
+                if run_health_check(server, state, client, settings, health_queries, deadline):
+                    warmup_remaining = max(0, settings.warmup_queries)
+                    continue
+                # Health checks are the only traffic sent to an unavailable
+                # upstream. Sleep until the next bounded recheck window.
+                next_in = state.snapshot().get("next_health_in_s")
+                sleep_cooperatively(float(next_in or settings.recheck_interval), deadline)
+                continue
+
+            if warmup_remaining > 0:
+                state.set_phase(Phase.WARMING, Verdict.HEALTHY, f"{warmup_remaining} warmup query(s) left")
+                domain = deck.draw()
+                outcome = client.query(server, domain)
+                state.mark_warmup(outcome)
+                if outcome.ok:
+                    warmup_remaining -= 1
+                elif state.snapshot()["consecutive_failures"] >= settings.failure_quarantine_threshold:
+                    next_health_at = monotonic() + settings.recheck_interval
+                    state.mark_benchmark_failure(
+                        outcome,
+                        threshold=settings.failure_quarantine_threshold,
+                        next_health_at=next_health_at,
+                    )
+                sleep_cooperatively(jittered_interval(settings.interval, settings.jitter, rng), deadline)
+                continue
+
+            state.set_phase(Phase.TESTING, Verdict.HEALTHY, "benchmarking")
+            domain = deck.draw()
+            outcome = client.query(server, domain)
+            if outcome.ok:
+                state.mark_benchmark_success(outcome)
+            else:
+                next_health_at = monotonic() + settings.recheck_interval
+                state.mark_benchmark_failure(
+                    outcome,
+                    threshold=settings.failure_quarantine_threshold,
+                    next_health_at=next_health_at,
+                )
+            sleep_cooperatively(jittered_interval(settings.interval, settings.jitter, rng), deadline)
+    except Exception as exc:  # noqa: BLE001 - worker death gets recorded, not hidden
+        state.set_phase(Phase.QUARANTINED, Verdict.UNAVAILABLE, f"worker crashed: {exc!r}")
+    finally:
+        state.mark_done()
+
+
+# ---------------------------------------------------------------------------
+# Renderers: plain for pipes, live cockpit for terminals, machine output final.
+# ---------------------------------------------------------------------------
+
+class BaseRenderer:
+    def __init__(self, settings: BenchmarkSettings, *, unicode: bool, color: bool):
+        self.settings = settings
+        self.unicode = unicode
+        self.color = color
+        self.frame = 0
+
+    def render(self, *_args, **_kwargs) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class QuietRenderer(BaseRenderer):
+    pass
+
+
+class PlainRenderer(BaseRenderer):
+    def __init__(self, settings: BenchmarkSettings, *, unicode: bool, color: bool):
+        super().__init__(settings, unicode=unicode, color=color)
+        self.next_snapshot_at = 0.0
+
+    def render(
+        self,
+        states: Sequence[ServerState],
+        *,
+        start_time: float,
+        deadline: float | None,
+        domain_count: int,
+        source: str,
+    ) -> None:
+        now = monotonic()
+        if self.next_snapshot_at == 0.0:
+            self.next_snapshot_at = now + self.settings.snapshot_interval
+            print(
+                f"dnsbench started: servers={len(states)} domains={domain_count} source={source} "
+                f"duration={human_duration(None if deadline is None else max(0.0, deadline - start_time))} "
+                f"mode={'continuous' if deadline is None else 'timed'}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+        if self.settings.snapshot_interval <= 0 or now < self.next_snapshot_at:
+            return
+        self.next_snapshot_at = now + self.settings.snapshot_interval
+        snaps = [s.snapshot() for s in states]
+        healthy = sum(1 for s in snaps if s["health_ok"] is True)
+        samples = sum(int(s["samples"]) for s in snaps)
+        failures = sum(int(s["benchmark_failures"]) for s in snaps)
+        elapsed = now - start_time
+        remaining = None if deadline is None else max(0.0, deadline - now)
+        print(
+            f"dnsbench snapshot: elapsed={human_duration(elapsed)} remaining={human_duration(remaining)} "
+            f"healthy={healthy}/{len(snaps)} samples={samples} failures={failures}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+
+class LiveRenderer(BaseRenderer):
+    def __init__(self, settings: BenchmarkSettings, *, unicode: bool, color: bool):
+        super().__init__(settings, unicode=unicode, color=color)
+        self._opened = False
+
+    def _spinner(self) -> str:
+        frames = SPINNER_FRAMES_UNICODE if self.unicode else SPINNER_FRAMES_ASCII
+        return frames[self.frame % len(frames)]
+
+    def _scanner(self) -> str:
+        frames = SCANNER_FRAMES_UNICODE if self.unicode else SCANNER_FRAMES_ASCII
+        return frames[self.frame % len(frames)]
+
+    def _verdict_icon(self, snap: dict[str, object]) -> str:
+        verdict = snap["verdict"]
+        phase = snap["phase"]
+        if self.unicode:
+            if verdict == Verdict.HEALTHY.value:
+                return paint("●", Ansi.GREEN, self.color)
+            if verdict == Verdict.DEGRADED.value:
+                return paint("▲", Ansi.YELLOW, self.color)
+            if verdict == Verdict.UNAVAILABLE.value:
+                return paint("●", Ansi.RED, self.color)
+            if phase in {Phase.CHECKING.value, Phase.QUEUED.value}:
+                return paint("◌", Ansi.CYAN, self.color)
+            return paint("○", Ansi.GREY, self.color)
+        if verdict == Verdict.HEALTHY.value:
+            return paint("OK", Ansi.GREEN, self.color)
+        if verdict == Verdict.DEGRADED.value:
+            return paint("!!", Ansi.YELLOW, self.color)
+        if verdict == Verdict.UNAVAILABLE.value:
+            return paint("NO", Ansi.RED, self.color)
+        return "--"
+
+    def _status_text(self, snap: dict[str, object]) -> str:
+        phase = str(snap["phase"])
+        if phase == Phase.QUARANTINED.value:
+            next_in = snap.get("next_health_in_s")
+            if isinstance(next_in, (int, float)):
+                return f"quarantine {human_duration(next_in)}"
+        return phase
+
+    def render(
+        self,
+        states: Sequence[ServerState],
+        *,
+        start_time: float,
+        deadline: float | None,
+        domain_count: int,
+        source: str,
+    ) -> None:
+        if not self._opened:
+            sys.stdout.write(Ansi.HIDE_CURSOR)
+            self._opened = True
+        now = monotonic()
+        elapsed = now - start_time
+        remaining = None if deadline is None else max(0.0, deadline - now)
+        snaps = [s.snapshot() for s in states]
+        healthy = sum(1 for s in snaps if s["health_ok"] is True)
+        samples = sum(int(s["samples"]) for s in snaps)
+        failures = sum(int(s["benchmark_failures"]) for s in snaps)
+        width = max(80, os.get_terminal_size().columns if stdout_is_tty() else 120)
+
+        title = f"{self._spinner()} dnsbench // homelab resolver telemetry extravaganza"
+        title = paint(title, Ansi.CYAN, self.color, bold=True)
+        mode = "continuous" if deadline is None else "timed"
+        if deadline is None:
+            bar = self._scanner()
+            progress = f"{bar} elapsed {human_duration(elapsed)}"
+        else:
+            duration = max(0.001, self.settings.duration or 1.0)
+            fraction = clamp(elapsed / duration, 0, 1)
+            bar = progress_bar(fraction, min(34, max(12, width - 86)), unicode=self.unicode)
+            progress = f"[{bar}] {fraction * 100:5.1f}% remaining {human_duration(remaining)}"
+
+        header = (
+            f"{title}\n"
+            f"mode={mode} transport={self.settings.transport} rdtype={self.settings.record_type} "
+            f"servers={healthy}/{len(states)} healthy domains={domain_count} "
+            f"samples={samples} bench_failures={failures} source={source}\n"
+            f"{progress}\n"
+        )
+
+        table_width = width
+        spark_width = min(self.settings.spark_width, max(8, width - 112))
+        columns = (
+            f"{' ':2} {'Server':22} {'State':15} {'Last':>8} {'Avg':>8} {'EWMA':>8} "
+            f"{'P50':>8} {'P95':>8} {'Samples':>7} {'Err%':>6} {'Rate':>7} {'Trend':{spark_width}}"
+        )
+        sep = "─" * min(table_width, len(strip_ansi(columns))) if self.unicode else "-" * min(table_width, len(strip_ansi(columns)))
+        rows = []
+        for snap in snaps:
+            icon = self._verdict_icon(snap)
+            display = ellipsize(str(snap["display"]), 22)
+            state = ellipsize(self._status_text(snap), 15)
+            spark = sparkline(snap["spark_values"], spark_width, unicode=self.unicode)
+            err_pct = snap["failure_percent"]
+            err_s = "-" if err_pct is None else f"{float(err_pct):5.1f}%"
+            row = (
+                f"{icon:2} {display:22} {state:15} "
+                f"{format_ms(snap['last_latency_ms'])} {format_ms(snap['avg_ms'])} "
+                f"{format_ms(snap['ewma_ms'])} {format_ms(snap['p50_ms'])} "
+                f"{format_ms(snap['p95_ms'])} {int(snap['samples']):7d} "
+                f"{err_s:>6} {format_rate(snap['qps']):>7} {spark:{spark_width}}"
+            )
+            if snap["verdict"] == Verdict.UNAVAILABLE.value:
+                row = paint(row, Ansi.RED, self.color, dim=True)
+            elif snap["verdict"] == Verdict.DEGRADED.value:
+                row = paint(row, Ansi.YELLOW, self.color)
+            elif snap["verdict"] == Verdict.HEALTHY.value:
+                row = paint(row, Ansi.GREEN, self.color)
+            rows.append(row)
+
+        footer_bits = []
+        leader = best_server(snaps)
+        if leader:
+            footer_bits.append(f"leader={leader['display']} avg={format_ms(leader['avg_ms']).strip()}ms")
+        latest_errors = [
+            f"{s['server']['label']}:{s['last_error']}"
+            for s in snaps
+            if s.get("last_error") and s.get("verdict") != Verdict.HEALTHY.value
+        ]
+        if latest_errors:
+            footer_bits.append("errors=" + ", ".join(ellipsize(e, 24) for e in latest_errors[:3]))
+        footer_bits.append("Ctrl+C stops cleanly")
+        footer = " | ".join(footer_bits)
+
+        screen = header + columns + "\n" + sep + "\n" + "\n".join(rows) + "\n\n" + paint(footer, Ansi.DIM, self.color) + "\n"
+        sys.stdout.write(Ansi.CLEAR + screen)
+        sys.stdout.flush()
+        self.frame += 1
+
+    def close(self) -> None:
+        if self._opened:
+            sys.stdout.write(Ansi.SHOW_CURSOR)
+            sys.stdout.flush()
+            self._opened = False
+
+
+def strip_ansi(text: str) -> str:
+    # Tiny local stripper for width math; good enough for our own SGR codes.
+    out = []
+    i = 0
+    while i < len(text):
+        if text[i] == "\033":
+            j = i + 1
+            while j < len(text) and text[j] != "m":
+                j += 1
+            i = j + 1
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
+def choose_renderer(settings: BenchmarkSettings) -> BaseRenderer:
+    unicode = settings.force_unicode if settings.force_unicode is not None else supports_unicode()
+    color = should_use_color(settings.color_mode, sys.stdout)
+    if settings.output_format is not OutputFormat.TEXT:
+        return QuietRenderer(settings, unicode=unicode, color=color)
+    if settings.ui_mode is UIMode.QUIET:
+        return QuietRenderer(settings, unicode=unicode, color=color)
+    if settings.ui_mode is UIMode.LIVE or (settings.ui_mode is UIMode.AUTO and stdout_is_tty()):
+        return LiveRenderer(settings, unicode=unicode, color=color)
+    return PlainRenderer(settings, unicode=unicode, color=should_use_color(settings.color_mode, sys.stderr))
+
+
+# ---------------------------------------------------------------------------
+# Summary and final output.
+# ---------------------------------------------------------------------------
+
+def best_server(snaps: Sequence[dict[str, object]]) -> dict[str, object] | None:
+    candidates = [s for s in snaps if isinstance(s.get("avg_ms"), (int, float)) and int(s.get("samples", 0)) > 0]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda s: (float(s["avg_ms"]), float(s.get("p95_ms") or 1e99)))
+
+
+def ranked_snaps(snaps: Sequence[dict[str, object]]) -> list[dict[str, object]]:
+    return sorted(
+        snaps,
+        key=lambda s: (
+            0 if isinstance(s.get("avg_ms"), (int, float)) else 1,
+            float(s.get("avg_ms") or 1e99),
+            str(s["display"]),
+        ),
+    )
+
+
+def build_summary(
+    states: Sequence[ServerState],
+    *,
+    settings: BenchmarkSettings,
+    start_time: float,
+    end_time: float,
+    domain_count: int,
+    domain_source: str,
+    pending_workers: int,
+    interrupted: bool,
+) -> dict[str, object]:
+    snaps = [s.snapshot() for s in states]
+    leader = best_server(snaps)
+    return {
+        "script": "dnsbench",
+        "version": SCRIPT_VERSION,
+        "started_at_utc": datetime.fromtimestamp(time.time() - (end_time - start_time), tz=timezone.utc).isoformat(timespec="seconds"),
+        "ended_at_utc": utc_now_iso(),
+        "elapsed_s": end_time - start_time,
+        "mode": "continuous" if settings.continuous else "timed",
+        "duration_s": settings.duration,
+        "interrupted": interrupted,
+        "shutdown_reason": shutdown_reason(),
+        "pending_workers_after_shutdown": pending_workers,
+        "transport": settings.transport,
+        "record_type": settings.record_type,
+        "domain_count": domain_count,
+        "domain_source": domain_source,
+        "settings": {
+            "interval_s": settings.interval,
+            "jitter": settings.jitter,
+            "query_timeout_s": settings.query_timeout,
+            "query_lifetime_s": settings.query_lifetime,
+            "health_timeout_s": settings.health_timeout,
+            "health_lifetime_s": settings.health_lifetime,
+            "health_retries": settings.health_retries,
+            "recheck_interval_s": settings.recheck_interval,
+            "failure_quarantine_threshold": settings.failure_quarantine_threshold,
+            "warmup_queries": settings.warmup_queries,
+            "window_size": settings.window_size,
+        },
+        "leader": leader["server"] if leader else None,
+        "servers": ranked_snaps(snaps),
+    }
+
+
+def print_text_summary(summary: dict[str, object]) -> None:
+    snaps = list(summary["servers"])
+    elapsed = float(summary["elapsed_s"])
+    print()
+    print("DNS benchmark final summary")
+    print("=" * 28)
+    print(
+        f"mode={summary['mode']} elapsed={human_duration(elapsed)} "
+        f"transport={summary['transport']} rdtype={summary['record_type']} "
+        f"domains={summary['domain_count']} source={summary['domain_source']}"
+    )
+    if summary.get("interrupted"):
+        print(f"stopped_by={summary['shutdown_reason']}")
+    if summary.get("pending_workers_after_shutdown"):
+        print(f"pending_workers_after_shutdown={summary['pending_workers_after_shutdown']}")
+
+    header = (
+        f"{'Rank':>4}  {'Server':28} {'Status':13} {'Avg ms':>9} {'Win ms':>9} "
+        f"{'P50':>9} {'P95':>9} {'Min':>9} {'Max':>9} {'Samples':>8} {'Fail%':>7} {'Rate':>8}"
+    )
+    print(header)
+    print("-" * len(header))
+    rank = 0
+    for snap in snaps:
+        if isinstance(snap.get("avg_ms"), (int, float)):
+            rank += 1
+            rank_s = str(rank)
+        else:
+            rank_s = "-"
+        fail_pct = snap["failure_percent"]
+        fail_s = "-" if fail_pct is None else f"{float(fail_pct):.1f}%"
+        print(
+            f"{rank_s:>4}  "
+            f"{ellipsize(str(snap['display']), 28):28} "
+            f"{ellipsize(str(snap['verdict']), 13):13} "
+            f"{format_ms(snap['avg_ms'], 9)} "
+            f"{format_ms(snap['window_avg_ms'], 9)} "
+            f"{format_ms(snap['p50_ms'], 9)} "
+            f"{format_ms(snap['p95_ms'], 9)} "
+            f"{format_ms(snap['min_ms'], 9)} "
+            f"{format_ms(snap['max_ms'], 9)} "
+            f"{int(snap['samples']):8d} "
+            f"{fail_s:>7} "
+            f"{format_rate(snap['qps']):>8}"
+        )
+
+    leader = best_server(snaps)
+    if leader:
+        print(
+            f"\nWinner: {leader['display']} with all-time average "
+            f"{format_ms(leader['avg_ms']).strip()} ms over {leader['samples']} samples."
+        )
+    else:
+        print("\nNo successful benchmark samples were collected.")
+
+    unavailable = [s for s in snaps if s["health_ok"] is False and not s.get("samples")]
+    if unavailable:
+        print("\nUnavailable/skipped upstreams:")
+        for snap in unavailable:
+            next_health = snap.get("next_health_in_s")
+            retry = f", next health probe in {human_duration(float(next_health))}" if isinstance(next_health, (int, float)) else ""
+            print(
+                f"- {snap['display']}: {snap.get('last_error') or 'health check failed'}"
+                f" ({snap.get('last_detail') or 'no detail'}{retry})"
+            )
+
+
+def print_json_summary(summary: dict[str, object]) -> None:
+    print(json.dumps(summary, indent=2, sort_keys=True))
+
+
+def print_csv_summary(summary: dict[str, object]) -> None:
+    fieldnames = [
+        "rank",
+        "label",
+        "address",
+        "verdict",
+        "health_ok",
+        "avg_ms",
+        "window_avg_ms",
+        "p50_ms",
+        "p95_ms",
+        "min_ms",
+        "max_ms",
+        "samples",
+        "benchmark_attempts",
+        "benchmark_failures",
+        "failure_percent",
+        "qps",
+        "last_error",
+        "last_domain",
+    ]
+    writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
+    writer.writeheader()
+    rank = 0
+    for snap in summary["servers"]:
+        server = snap["server"]
+        if isinstance(snap.get("avg_ms"), (int, float)):
+            rank += 1
+            rank_value: int | str = rank
+        else:
+            rank_value = ""
+        writer.writerow(
+            {
+                "rank": rank_value,
+                "label": server["label"],
+                "address": server["address"],
+                "verdict": snap["verdict"],
+                "health_ok": snap["health_ok"],
+                "avg_ms": snap["avg_ms"],
+                "window_avg_ms": snap["window_avg_ms"],
+                "p50_ms": snap["p50_ms"],
+                "p95_ms": snap["p95_ms"],
+                "min_ms": snap["min_ms"],
+                "max_ms": snap["max_ms"],
+                "samples": snap["samples"],
+                "benchmark_attempts": snap["benchmark_attempts"],
+                "benchmark_failures": snap["benchmark_failures"],
+                "failure_percent": snap["failure_percent"],
+                "qps": snap["qps"],
+                "last_error": snap["last_error"],
+                "last_domain": snap["last_domain"],
+            }
+        )
+
+
+def print_summary(summary: dict[str, object], output_format: OutputFormat) -> None:
+    if output_format is OutputFormat.JSON:
+        print_json_summary(summary)
+    elif output_format is OutputFormat.CSV:
+        print_csv_summary(summary)
+    else:
+        print_text_summary(summary)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator.
+# ---------------------------------------------------------------------------
+
+class DNSBenchApp:
+    def __init__(self, settings: BenchmarkSettings):
+        self.settings = settings
+        self.servers = NameServer.all()
+        self.states = [
+            ServerState(server, window_size=settings.window_size, spark_width=settings.spark_width)
+            for server in self.servers
+        ]
+        self.client = DNSClient(settings)
+        self.domain_deck: DomainDeck | None = None
+        self.domain_count = 0
+        self.domain_source = "unknown"
+        self.deadline: float | None = None
+        self.start_time: float | None = None
+        self.end_time: float | None = None
+        self.pending_workers = 0
+        self.interrupted = False
+
+    def load_domains(self) -> None:
+        domains, source = fetch_domains(self.settings)
+        self.domain_deck = DomainDeck(domains, self.settings.seed)
+        self.domain_count = len(domains)
+        self.domain_source = source
+
+    def run(self) -> int:
+        install_signal_handlers()
+        self.load_domains()
+        assert self.domain_deck is not None
+        self.start_time = monotonic()
+        self.deadline = None if self.settings.continuous else self.start_time + float(self.settings.duration or 0)
+        renderer = choose_renderer(self.settings)
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(self.servers),
+            thread_name_prefix="dnsbench",
+        )
+        futures: list[concurrent.futures.Future[None]] = []
+
+        for server, state in zip(self.servers, self.states, strict=True):
+            futures.append(
+                executor.submit(
+                    server_worker,
+                    server,
+                    state,
+                    self.domain_deck,
+                    self.client,
+                    self.settings,
+                    DEFAULT_HEALTHCHECK_QUERIES,
+                    self.deadline,
+                )
+            )
+
+        exit_code = 0
+        try:
+            while should_continue(self.deadline):
+                renderer.render(
+                    self.states,
+                    start_time=self.start_time,
+                    deadline=self.deadline,
+                    domain_count=self.domain_count,
+                    source=self.domain_source,
+                )
+                sleep_cooperatively(self.settings.refresh_interval, self.deadline)
+            request_shutdown("duration elapsed" if self.deadline is not None else "completed")
+        except KeyboardInterrupt:
+            self.interrupted = True
+            exit_code = signal_exit_code()
+            reason = shutdown_reason()
+            if self.settings.output_format is OutputFormat.TEXT and not isinstance(renderer, LiveRenderer):
+                print(f"Interrupted by {reason}; stopping cleanly...", file=sys.stderr, flush=True)
+        finally:
+            request_shutdown(shutdown_reason())
+            for state in self.states:
+                state.mark_stopping()
+            for future in futures:
+                future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
+            wait_timeout = max(self.settings.query_lifetime, self.settings.health_lifetime) + 0.75
+            _, pending = concurrent.futures.wait(futures, timeout=wait_timeout)
+            self.pending_workers = len(pending)
+            for state in self.states:
+                state.mark_done()
+            self.end_time = monotonic()
+            renderer.close()
+
+        # Worker exceptions are already represented by state, but consume them so
+        # Python cannot complain about unobserved future failures in odd runtimes.
+        for future in futures:
+            if future.done() and not future.cancelled():
+                try:
+                    future.result(timeout=0)
+                except Exception:
+                    pass
+
+        summary = build_summary(
+            self.states,
+            settings=self.settings,
+            start_time=self.start_time,
+            end_time=self.end_time,
+            domain_count=self.domain_count,
+            domain_source=self.domain_source,
+            pending_workers=self.pending_workers,
+            interrupted=self.interrupted,
+        )
+        print_summary(summary, self.settings.output_format)
+
+        if self.pending_workers:
+            print(
+                f"Warning: {self.pending_workers} worker(s) were still inside a DNS call after shutdown wait; "
+                "they are not scheduling new work and should exit at resolver timeout.",
+                file=sys.stderr,
+            )
+            if exit_code == 0:
+                exit_code = 2
+
+        if exit_code == 0:
+            total_samples = sum(int(s.snapshot()["samples"]) for s in self.states)
+            if total_samples == 0:
+                exit_code = 1
+        return exit_code
+
+
+# ---------------------------------------------------------------------------
+# CLI: many knobs, no config files.
+# ---------------------------------------------------------------------------
+
+def positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not a number: {value}") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return parsed
+
+
+def nonnegative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not a number: {value}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an integer: {value}") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be > 0")
+    return parsed
+
+
+def nonnegative_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not an integer: {value}") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return parsed
+
+
+class SmartFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawDescriptionHelpFormatter):
+    pass
+
+
+def build_parser() -> argparse.ArgumentParser:
+    examples = textwrap.dedent(
+        """
+        examples:
+          dnsbench                         # timed run, live UI if attached to a terminal
+          dnsbench --duration 10           # benchmark for ten seconds
+          dnsbench --continuous            # keep testing until Ctrl+C, preserving running averages
+          dnsbench --ui live --color always
+          dnsbench --output json --quiet   # machine-readable one-shot timed summary
+          dnsbench --tcp --rdtype AAAA     # same servers, TCP transport, AAAA records
+        """
+    ).strip()
+    parser = argparse.ArgumentParser(
+        prog="dnsbench",
+        description="Benchmark the hard-coded homelab DNS upstreams with health gates, live stats, and clean shutdown.",
+        epilog=examples,
+        formatter_class=SmartFormatter,
+    )
+    mode = parser.add_argument_group("run mode")
+    mode.add_argument("-d", "--duration", type=positive_float, default=30.0, help="timed-run duration in seconds")
+    mode.add_argument("-c", "--continuous", action="store_true", help="run until Ctrl+C instead of stopping at --duration")
+    mode.add_argument("--interval", type=nonnegative_float, default=0.25, help="target pause between benchmark queries per healthy upstream")
+    mode.add_argument("--jitter", type=nonnegative_float, default=0.15, help="fractional randomization applied to --interval")
+    mode.add_argument("--warmup", type=nonnegative_int, default=1, help="successful uncounted warmup queries after a health pass")
+
+    dns_group = parser.add_argument_group("dns behavior")
+    dns_group.add_argument("--rdtype", default="A", help="DNS record type to benchmark")
+    dns_group.add_argument("--tcp", action="store_true", help="use TCP instead of UDP for DNS queries")
+    dns_group.add_argument("--query-timeout", type=positive_float, default=1.0, help="single resolver try timeout")
+    dns_group.add_argument("--query-lifetime", type=positive_float, default=2.0, help="overall benchmark query lifetime")
+    dns_group.add_argument("--fetch-timeout", type=positive_float, default=10.0, help="whitelist HTTP fetch timeout")
+    dns_group.add_argument("--whitelist-url", default=WHITELIST_URL, help="domain whitelist URL; still no config file")
+    dns_group.add_argument("--strict-whitelist", action="store_true", help="fail instead of using built-in fallback domains if whitelist fetch fails")
+
+    health = parser.add_argument_group("health gate and quarantine")
+    health.add_argument("--health-timeout", type=positive_float, default=0.75, help="single resolver try timeout for health checks")
+    health.add_argument("--health-lifetime", type=positive_float, default=1.5, help="overall health-check query lifetime")
+    health.add_argument("--health-retries", type=positive_int, default=1, help="passes over health-check domains before declaring unavailable")
+    health.add_argument("--recheck-interval", type=positive_float, default=15.0, help="how long to quarantine an unavailable upstream before another health probe")
+    health.add_argument("--failure-threshold", type=positive_int, default=3, help="consecutive benchmark failures before quarantining a formerly healthy upstream")
+
+    ui = parser.add_argument_group("display")
+    ui.add_argument("--ui", choices=[m.value for m in UIMode], default=UIMode.AUTO.value, help="terminal UI mode")
+    ui.add_argument("--quiet", action="store_true", help="suppress progress UI; still prints final summary")
+    ui.add_argument("--refresh", type=positive_float, default=0.20, help="live UI refresh interval")
+    ui.add_argument("--snapshot-interval", type=nonnegative_float, default=5.0, help="plain-mode progress snapshot interval on stderr; 0 disables")
+    ui.add_argument("--window", type=positive_int, default=200, help="rolling latency window for percentiles/window average")
+    ui.add_argument("--spark-width", type=positive_int, default=24, help="sparkline width")
+    ui.add_argument("--color", choices=[m.value for m in ColorMode], default=ColorMode.AUTO.value, help="color mode")
+    glyphs = ui.add_mutually_exclusive_group()
+    glyphs.add_argument("--unicode", action="store_true", help="force unicode glyphs")
+    glyphs.add_argument("--ascii", action="store_true", help="force ASCII-only glyphs")
+
+    output = parser.add_argument_group("output")
+    output.add_argument("--output", choices=[m.value for m in OutputFormat], default=OutputFormat.TEXT.value, help="final summary format")
+    output.add_argument("--seed", type=int, default=None, help="random seed for repeatable domain ordering")
+    output.add_argument("--version", action="version", version=f"%(prog)s {SCRIPT_VERSION}")
+    return parser
+
+
+def settings_from_args(args: argparse.Namespace) -> BenchmarkSettings:
+    ui_mode = UIMode.QUIET if args.quiet else UIMode(args.ui)
+    force_unicode: bool | None
+    if args.unicode:
+        force_unicode = True
+    elif args.ascii:
+        force_unicode = False
+    else:
+        force_unicode = None
+    return BenchmarkSettings(
+        duration=None if args.continuous else args.duration,
+        continuous=bool(args.continuous),
+        interval=args.interval,
+        jitter=clamp(args.jitter, 0.0, 1.0),
+        query_timeout=args.query_timeout,
+        query_lifetime=args.query_lifetime,
+        health_timeout=args.health_timeout,
+        health_lifetime=args.health_lifetime,
+        health_retries=args.health_retries,
+        recheck_interval=args.recheck_interval,
+        failure_quarantine_threshold=args.failure_threshold,
+        warmup_queries=args.warmup,
+        record_type=args.rdtype.upper(),
+        tcp=bool(args.tcp),
+        refresh_interval=args.refresh,
+        snapshot_interval=args.snapshot_interval,
+        window_size=args.window,
+        spark_width=args.spark_width,
+        seed=args.seed,
+        fetch_timeout=args.fetch_timeout,
+        whitelist_url=args.whitelist_url,
+        output_format=OutputFormat(args.output),
+        ui_mode=ui_mode,
+        color_mode=ColorMode(args.color),
+        force_unicode=force_unicode,
+        strict_whitelist=bool(args.strict_whitelist),
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    settings = settings_from_args(args)
+    app = DNSBenchApp(settings)
+    try:
+        return app.run()
+    except RuntimeError as exc:
+        print(f"dnsbench: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        request_shutdown("KeyboardInterrupt", signal.SIGINT)
+        return signal_exit_code()
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
